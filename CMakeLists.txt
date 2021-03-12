@@ -5,6 +5,7 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   std_msgs
   geometry_msgs
+  nav_msgs
   project11_transformations
   tf2
   message_generation
@@ -23,7 +24,7 @@ generate_dynamic_reconfigure_options(
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES missionmanager
-  CATKIN_DEPENDS rospy std_msgs geometry_msgs
+  CATKIN_DEPENDS rospy std_msgs geometry_msgs nav_msgs
 #  DEPENDS system_lib
 )
 

@@ -9,13 +9,12 @@ import smach_ros
 
 from std_msgs.msg import String
 from geographic_msgs.msg import GeoPointStamped
-from marine_msgs.msg import NavEulerStamped
 from marine_msgs.msg import Heartbeat
 from marine_msgs.msg import KeyValue
-from marine_msgs.msg import CourseMadeGoodStamped
 from geographic_msgs.msg import GeoPoseStamped
 from geographic_msgs.msg import GeoPose
 from geographic_msgs.msg import GeoPoint
+from nav_msgs.msg import Odometry
 
 from dynamic_reconfigure.server import Server
 from mission_manager.cfg import mission_managerConfig
@@ -31,6 +30,9 @@ import manda_coverage.msg
 
 import project11
 from tf.transformations import quaternion_from_euler
+from tf.transformations import euler_from_quaternion
+from tf2_geometry_msgs import do_transform_pose
+import tf2_ros
 
 import json
 import math
@@ -38,30 +40,29 @@ import math
 class MissionManagerCore(object):
     def __init__(self):
         self.piloting_mode = 'standby'
-        self.position = None
-        self.heading = None
-        self.cmg = None
+        self.odometry = None
 
         self.tasks = [] # list of tasks to do, or already done. Keeping all the tasks allows us to run them in a loop
         #self.pending_tasks = [] # list of tasks to be done. Once a task is completed, it is dropped from this list. Overrides get prepended here.
         self.current_task = None
-        self.override_task = None # a task that may be added, such as hover, to to temporarily interupt current tast.
+        self.override_task = None # a task that may be added, such as hover, to temporarily interupt current tast.
         self.saved_task = None # a task that was current when an override task was added
         self.pending_command = None
         
         self.done_behavior = 'hover'
         
         rospy.Subscriber('project11/piloting_mode', String, self.pilotingModeCallback, queue_size = 1)
-        rospy.Subscriber('position', GeoPointStamped, self.positionCallback, queue_size = 1)
-        rospy.Subscriber('heading', NavEulerStamped, self.headingCallback, queue_size = 1)
-        rospy.Subscriber('cmg', CourseMadeGoodStamped, self.cmgCallback, queue_size = 1)
+        rospy.Subscriber('odom', Odometry, self.odometryCallback, queue_size = 1)
         rospy.Subscriber('project11/mission_manager/command', String, self.commandCallback, queue_size = 1)
         rospy.Subscriber('project11/heartbeat', Heartbeat, self.heartbeatCallback, queue_size = 1)
 
         
-        self.status_publisher = rospy.Publisher('project11/mission_manager/status', Heartbeat, queue_size = 10)
+        self.status_publisher = rospy.Publisher('project11/status/mission_manager', Heartbeat, queue_size = 10)
 
         self.config_server = Server(mission_managerConfig, self.reconfigure_callback)
+        
+        self.tfBuffer = tf2_ros.Buffer()
+        self.listener = tf2_ros.TransformListener(self.tfBuffer)
 
     def pilotingModeCallback(self, msg):
         self.piloting_mode = msg.data
@@ -71,15 +72,9 @@ class MissionManagerCore(object):
             if kv.key == 'piloting_mode':
                 self.piloting_mode = kv.value
             
-    def positionCallback(self, msg):
-        self.position = msg
+    def odometryCallback(self, msg):
+        self.odometry = msg
         
-    def headingCallback(self, msg):
-        self.heading = msg
-        
-    def cmgCallback(self, msg):
-        self.cmg = msg
-
     def reconfigure_callback(self, config, level):
         self.waypointThreshold = config['waypoint_threshold']
         self.turnRadius = config['turn_radius']
@@ -212,18 +207,39 @@ class MissionManagerCore(object):
         ret['current_nav_objective_index'] = 0
         return ret
 
+    def position(self):
+      if self.odometry is not None:
+        try:
+          odom_to_earth = self.tfBuffer.lookup_transform("earth", self.odometry.header.frame_id, rospy.Time())
+        except Exception as e:
+          print(e)
+          return
+        ecef = do_transform_pose(self.odometry.pose, odom_to_earth).pose.position
+        return project11.wgs84.fromECEFtoLatLong(ecef.x, ecef.y, ecef.z)
+
+    def heading(self):
+      if self.odometry is not None:
+        o = self.odometry.pose.pose.orientation
+        q = (o.x, o.y, o.z, o.w)
+        return 90-math.degrees(euler_from_quaternion(q)[2])
+      
     def distanceTo(self, lat, lon):
-        current_lat_rad = math.radians(self.position.position.latitude)
-        current_lon_rad = math.radians(self.position.position.longitude)
-        target_lat_rad = math.radians(lat)
-        target_lon_rad = math.radians(lon)
-        azimuth, distance = project11.geodesic.inverse(current_lon_rad, current_lat_rad, target_lon_rad, target_lat_rad)
-        return distance
+      p_rad = self.position()
+      current_lat_rad = p_rad[0]
+      current_lon_rad = p_rad[1]
+      target_lat_rad = math.radians(lat)
+      target_lon_rad = math.radians(lon)
+      azimuth, distance = project11.geodesic.inverse(current_lon_rad, current_lat_rad, target_lon_rad, target_lat_rad)
+      return distance
 
     def generatePathFromVehicle(self, targetLat, targetLon, targetHeading):
-        return self.generatePath(self.position.position.latitude, self.position.position.longitude, self.heading.orientation.heading, targetLat, targetLon, targetHeading)
+      p = self.position()
+      h = self.heading()
+      #print('generatePathFromVehicle',p,h)
+      return self.generatePath(math.degrees(p[0]), math.degrees(p[1]), h, targetLat, targetLon, targetHeading)
 
     def generatePath(self, startLat, startLon, startHeading, targetLat, targetLon, targetHeading):
+        #print('generatePath: from:',startLat,startLon,'to:',targetLat,targetLon)
         rospy.wait_for_service('dubins_curves_latlong')
         dubins_service = rospy.ServiceProxy('dubins_curves_latlong', DubinsCurvesLatLong)
 
@@ -253,7 +269,7 @@ class MissionManagerCore(object):
 
         #print dubins_req
         dubins_path = dubins_service(dubins_req)
-        #print dubins_path
+        #print (dubins_path)
         return dubins_path.path
 
     def segmentHeading(self,lat1,lon1,lat2,lon2):
@@ -267,7 +283,11 @@ class MissionManagerCore(object):
         return math.degrees(path_azimuth)
 
     def headingToPoint(self,lat,lon):
-        return self.segmentHeading(self.position.position.latitude, self.position.position.longitude, lat, lon)
+      p = self.position()
+      dest_lat_rad = math.radians(lat1)
+      dest_lon_rad = math.radians(lon1)
+      azimuth, distance = project11.geodesic.inverse(p[1], p[0], dest_lon_rad, dest_lat_rad)
+      return math.degrees(azimuth)
     
     def headingToYaw(self, heading):
         return 90-heading
@@ -337,8 +357,9 @@ class MissionManagerCore(object):
                             self.current_task = self.tasks[0]
                         elif self.done_behavior == 'hover':
                             self.current_task = {'type':'hover'}
-                            self.current_task['latitude'] = self.position.position.latitude
-                            self.current_task['longitude'] = self.position.position.longitude
+                            position = self.position()
+                            self.current_task['latitude'] = math.degrees(position[0])
+                            self.current_task['longitude'] = math.degrees(position[1])
                 if self.current_task is not None and self.current_task['type'] == 'mission_plan':
                     self.current_task['current_nav_objective_index'] = None
                     self.current_task['current_path'] = None
