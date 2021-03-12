@@ -6,7 +6,6 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   geometry_msgs
   nav_msgs
-  project11_transformations
   tf2
   message_generation
   dynamic_reconfigure
