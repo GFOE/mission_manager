@@ -284,8 +284,8 @@ class MissionManagerCore(object):
 
     def headingToPoint(self,lat,lon):
       p = self.position()
-      dest_lat_rad = math.radians(lat1)
-      dest_lon_rad = math.radians(lon1)
+      dest_lat_rad = math.radians(lat)
+      dest_lon_rad = math.radians(lon)
       azimuth, distance = project11.geodesic.inverse(p[1], p[0], dest_lon_rad, dest_lat_rad)
       return math.degrees(azimuth)
     
