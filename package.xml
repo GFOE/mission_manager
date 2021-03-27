@@ -17,6 +17,7 @@
   <depend>dynamic_reconfigure</depend>
   <depend>path_follower</depend>
   <depend>path_planner</depend>
+  <depend>smach_ros</depend>
 
   <!-- The export tag contains other, unspecified, tags -->
   <export>
