@@ -314,6 +314,8 @@ class MissionManagerCore(object):
         
         if self.override_task is not None:
             self.current_task = self.saved_task
+            if self.current_task is None and len(self.tasks):
+                self.current_task = self.tasks[0]
             self.override_task = None
             if self.pending_command == 'next_task':
                 self.pending_command = None
