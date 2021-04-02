@@ -398,7 +398,7 @@ class MissionManagerCore(object):
         hb.values.append(KeyValue('tasks_count',str(len(self.tasks))))
         for t in self.tasks:
             tstring = t['type']
-            if t['type'] == 'mission_plan':
+            if t['type'] == 'mission_plan' and 'label' in t:
                 tstring += ' ('+t['label']+')'
             hb.values.append(KeyValue('-task',tstring))
 
