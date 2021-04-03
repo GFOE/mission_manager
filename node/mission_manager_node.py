@@ -481,8 +481,7 @@ class Hover(MMState):
         while True:
             ret = self.missionManager.iterate('Hover')
             if ret is not None:
-                if ret == 'cancelled':
-                    self.hover_client.cancel_goal()
+                self.hover_client.cancel_goal()
                 return ret
 
 class LineEnded(MMState):
