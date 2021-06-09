@@ -141,6 +141,7 @@ class MissionManagerCore(object):
     def clearTasks(self):
         self.tasks = []
         self.current_task = None
+        self.saved_task = None
 
     def addTask(self, args, prepend=False):
         parts = args.split(None,1)
