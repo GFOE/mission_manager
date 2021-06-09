@@ -233,6 +233,9 @@ class MissionManagerCore(object):
       azimuth, distance = project11.geodesic.inverse(current_lon_rad, current_lat_rad, target_lon_rad, target_lat_rad)
       return distance
 
+    def waypointReached(self, lat, lon):
+      return self.distanceTo(lat, lon) < self.waypointThreshold
+
     def generatePathFromVehicle(self, targetLat, targetLon, targetHeading):
       p = self.position()
       h = self.heading()
@@ -468,12 +471,26 @@ class NextTask(MMState):
 
 class Hover(MMState):
     def __init__(self, mm):
-        MMState.__init__(self, mm, outcomes=['cancelled','exit','pause'])
+        MMState.__init__(self, mm, outcomes=['cancelled', 'exit', 'pause', 'follow_path'])
         self.hover_client = actionlib.SimpleActionClient('hover_action', hover.msg.hoverAction)
         
     def execute(self, userdata):
         task = self.missionManager.getCurrentTask()
         if task is not None:
+            if not self.missionManager.waypointReached(task['latitude'],task['longitude']):
+                path = []
+                p = self.missionManager.position()
+                gp = GeoPose()
+                gp.position.latitude = math.degrees(p[0])
+                gp.position.longitude = math.degrees(p[1])
+                path.append(gp)
+                g = GeoPose()
+                g.position.latitude = task['latitude']
+                g.position.longitude = task['longitude']
+                path.append(g)
+                task['path'] = path
+                task['default_speed'] = self.missionManager.default_speed
+                return 'follow_path'
             goal = hover.msg.hoverGoal()
             goal.target.latitude = task['latitude']
             goal.target.longitude = task['longitude']
@@ -562,7 +579,7 @@ class Goto(MMState):
         
 class FollowPath(MMState):
     def __init__(self, mm):
-        MMState.__init__(self, mm, outcomes=['done','cancelled','exit','pause'])
+        MMState.__init__(self, mm, outcomes=['done','cancelled','exit','pause', 'hover'])
         self.path_follower_client = actionlib.SimpleActionClient('path_follower_action', path_follower.msg.path_followerAction)
         self.path_planner_client = actionlib.SimpleActionClient('path_planner_action', path_planner.msg.path_plannerAction)
         self.task_complete = False
@@ -575,7 +592,7 @@ class FollowPath(MMState):
             elif self.missionManager.planner == 'path_planner':   
                 goal = path_planner.msg.path_plannerGoal()
             goal.path.header.stamp = rospy.Time.now()
-            if task['type'] == 'goto':
+            if task['type'] in ('goto', 'hover'):
                 path = task['path']
             if task['type'] == 'mission_plan':
                 if task['transit_path'] is not None:
@@ -608,7 +625,15 @@ class FollowPath(MMState):
                         self.path_planner_client.cancel_goal()
                 return ret
             if self.task_complete:
+                if task['type'] == 'hover':
+                    return 'hover'
                 return 'done'
+            if task['type'] == 'hover' and self.missionManager.waypointReached(task['latitude'], task['longitude']):
+              if self.missionManager.planner == 'path_follower':
+                self.path_follower_client.cancel_goal()
+              elif self.missionManager.planner == 'path_planner':
+                self.path_planner_client.cancel_goal()
+              return 'hover'
 
     def path_follower_done_callback(self, status, result):
         self.task_complete = True
@@ -674,10 +699,10 @@ def main():
         with sm_auto:
             smach.StateMachine.add('IDLE', Idle(missionManager), transitions={'do-task':'NEXTTASK', 'pause':'pause'})
             smach.StateMachine.add('NEXTTASK', NextTask(missionManager), transitions={'idle':'IDLE', 'mission_plan':'MISSIONPLAN', 'hover':'HOVER', 'goto':'GOTO'})
-            smach.StateMachine.add('HOVER', Hover(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK'})
+            smach.StateMachine.add('HOVER', Hover(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK', 'follow_path':'FOLLOWPATH'})
             smach.StateMachine.add('MISSIONPLAN', MissionPlan(missionManager), transitions={'done':'NEXTTASK', 'follow_path':'FOLLOWPATH', 'survey_area':'SURVEYAREA'})
             smach.StateMachine.add('GOTO',Goto(missionManager), transitions={'done':'NEXTTASK', 'follow_path':'FOLLOWPATH'})
-            smach.StateMachine.add('FOLLOWPATH', FollowPath(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK', 'done':'LINEENDED'})
+            smach.StateMachine.add('FOLLOWPATH', FollowPath(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK', 'done':'LINEENDED', 'hover':'HOVER'})
             smach.StateMachine.add('LINEENDED', LineEnded(missionManager), transitions={'mission_plan': 'MISSIONPLAN', 'next_item':'NEXTTASK'})
             smach.StateMachine.add('SURVEYAREA', SurveyArea(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK', 'done':'NEXTTASK'})
 
