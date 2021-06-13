@@ -48,7 +48,9 @@ class MissionManagerCore(object):
         self.override_task = None # a task that may be added, such as hover, to temporarily interupt current tast.
         self.saved_task = None # a task that was current when an override task was added
         self.pending_command = None
-        
+
+        self.lineup_distance = 25
+
         self.done_behavior = 'hover'
         
         rospy.Subscriber('project11/piloting_mode', String, self.pilotingModeCallback, queue_size = 1)
@@ -58,6 +60,7 @@ class MissionManagerCore(object):
 
         
         self.status_publisher = rospy.Publisher('project11/status/mission_manager', Heartbeat, queue_size = 10)
+        self.endofline_publisher = rospy.Publisher('project11/endofline', String, queue_size = 1)
 
         self.config_server = Server(mission_managerConfig, self.reconfigure_callback)
         
@@ -489,6 +492,7 @@ class Hover(MMState):
                 g.position.longitude = task['longitude']
                 path.append(g)
                 task['path'] = path
+                task['path_type'] = 'transit'
                 task['default_speed'] = self.missionManager.default_speed
                 return 'follow_path'
             goal = hover.msg.hoverGoal()
@@ -511,9 +515,11 @@ class LineEnded(MMState):
         if task is not None and task['type'] == 'mission_plan':
             if task['transit_path'] is not None:
                 task['transit_path'] = None
+                self.missionManager.endofline_publisher.publish("transit")
             else:
                 task['current_path'] = None
                 task['current_nav_objective_index'] += 1
+                self.missionManager.endofline_publisher.publish("track")
             return 'mission_plan'
         self.missionManager.pending_command = 'next_task'
         return 'next_item'
@@ -544,7 +550,7 @@ class MissionPlan(MMState):
         print(task['nav_objectives'])
         for p in task['nav_objectives'][task['current_nav_objective_index']]['waypoints']:
             #path.append((p['position']['latitude'],p['position']['longitude']))
-            gp = GeoPose();
+            gp = GeoPose()
             gp.position.latitude = p['latitude']
             gp.position.longitude = p['longitude']
             path.append(gp)
@@ -556,7 +562,11 @@ class MissionPlan(MMState):
             next_point = task['current_path'][1]
             if task['do_transit'] and self.missionManager.distanceTo(start_point.position.latitude,start_point.position.longitude) > self.missionManager.waypointThreshold and self.missionManager.planner == 'path_follower':
                 #transit
-                transit_path = self.missionManager.generatePathFromVehicle(start_point.position.latitude,start_point.position.longitude, self.missionManager.segmentHeading(start_point.position.latitude,start_point.position.longitude,next_point.position.latitude,next_point.position.longitude))
+                segment_heading = self.missionManager.segmentHeading(start_point.position.latitude,start_point.position.longitude,next_point.position.latitude,next_point.position.longitude)
+                pre_start = project11.geodesic.direct(math.radians(start_point.position.longitude), math.radians(start_point.position.latitude), math.radians(segment_heading+180), self.missionManager.lineup_distance)
+                #print ('heading',segment_heading, 'start:', start_point.position, 'pre start:',  math.degrees(pre_start[1]), math.degrees(pre_start[0]))
+                transit_path = self.missionManager.generatePathFromVehicle(math.degrees(pre_start[1]), math.degrees(pre_start[0]), segment_heading)
+                transit_path.append(start_point)
                 task['transit_path'] = transit_path
             task['do_transit'] = True
         
@@ -574,6 +584,7 @@ class Goto(MMState):
             headingToPoint = self.missionManager.headingToPoint(task['latitude'],task['longitude'])
             path = self.missionManager.generatePathFromVehicle(task['latitude'],task['longitude'],headingToPoint)
             task['path'] = path
+            task['path_type'] = 'transit'
             task['default_speed'] = self.missionManager.default_speed
             return 'follow_path'
         
@@ -642,6 +653,11 @@ class FollowPath(MMState):
         pass
     
     def path_follower_feedback_callback(self, msg):
+        task = self.missionManager.getCurrentTask()
+        if task is not None:
+            if 'path_type' in task and task['path_type'] == 'transit':
+                pass
+                #print(msg)
         pass
 
 class SurveyArea(MMState):
