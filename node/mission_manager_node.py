@@ -15,6 +15,7 @@ from geographic_msgs.msg import GeoPoseStamped
 from geographic_msgs.msg import GeoPose
 from geographic_msgs.msg import GeoPoint
 from nav_msgs.msg import Odometry
+from geographic_visualization_msgs.msg import GeoVizItem, GeoVizPointList
 
 from dynamic_reconfigure.server import Server
 from mission_manager.cfg import mission_managerConfig
@@ -61,6 +62,7 @@ class MissionManagerCore(object):
         
         self.status_publisher = rospy.Publisher('project11/status/mission_manager', Heartbeat, queue_size = 10)
         self.endofline_publisher = rospy.Publisher('project11/endofline', String, queue_size = 1)
+        self.display_publisher = rospy.Publisher('project11/display', GeoVizItem, queue_size = 1)
 
         self.config_server = Server(mission_managerConfig, self.reconfigure_callback)
         
@@ -401,14 +403,68 @@ class MissionManagerCore(object):
         hb = Heartbeat()
         hb.header.stamp = rospy.Time.now()
 
+        gvi = GeoVizItem()
+        gvi.id = 'mission_manager'
+        
         hb.values.append(KeyValue('state',state))
         hb.values.append(KeyValue('tasks_count',str(len(self.tasks))))
+
+        lastPosition = None
+        lastHeading = None
+        if self.current_task is None:
+            p = self.position()
+            if p is not None:
+                lastPosition = {'latitude': math.degrees(p[0]), 'longitude': math.degrees(p[1])}
+            lastHeading = self.heading()
+
         for t in self.tasks:
             tstring = t['type']
             if t['type'] == 'mission_plan' and 'label' in t:
                 tstring += ' ('+t['label']+')'
             hb.values.append(KeyValue('-task',tstring))
 
+            if t['type'] == 'mission_plan':
+                for track_num in range(len(t['nav_objectives'])):
+                    nav_o = t['nav_objectives'][track_num]
+                    nextHeading = None
+                    if len(nav_o['waypoints']) >= 2:
+                        wp1 = nav_o['waypoints'][0]
+                        wp2 = nav_o['waypoints'][1]
+                        nextHeading = self.segmentHeading(wp1['latitude'], wp1['longitude'], wp2['latitude'], wp2['longitude'])
+                    elif len(nav_o['waypoints']) == 1 and lastPosition is not None:
+                        wp1 = nav_o['waypoints'][0]
+                        nextHeading = self.segmentHeading(lastPosition['latitude'], lastPosition['longitude'], wp1['latitude'], wp1['longitude'])
+                    if nextHeading is not None and lastHeading is not None:
+                        gvpl = GeoVizPointList() # transit line
+                        gvpl.color.a = 0.5
+                        gvpl.color.r = 0.4
+                        gvpl.color.g = 0.4
+                        gvpl.color.b = 0.4
+                        gvpl.size = 2
+                        for p in self.generatePath(lastPosition['latitude'], lastPosition['longitude'], lastHeading, wp1['latitude'], wp1['longitude'], nextHeading):
+                            gvpl.points.append(p.position)
+                        gvi.lines.append(gvpl)
+                    if len(nav_o['waypoints']):
+                        gvpl = GeoVizPointList() # track line
+                        gvpl.color.a = 0.75
+                        gvpl.color.r = 0.65
+                        gvpl.color.g = 0.4
+                        gvpl.color.b = 0.75
+                        gvpl.size = 3
+                        for wp in nav_o['waypoints']:
+                            gp = GeoPoint()
+                            gp.latitude = wp['latitude']
+                            gp.longitude = wp['longitude']
+                            gvpl.points.append(gp)
+                        gvi.lines.append(gvpl)
+                        lastPosition = nav_o['waypoints'][-1]
+                        if len(nav_o['waypoints']) >= 2:
+                            wp1 = nav_o['waypoints'][-2]
+                            wp2 = nav_o['waypoints'][-1]
+                            lastHeading = self.segmentHeading(wp1['latitude'], wp1['longitude'], wp2['latitude'], wp2['longitude'])
+
+        self.display_publisher.publish(gvi)                
+                    
         if self.current_task is None:
             hb.values.append(KeyValue('current_task','None'))
         else:
