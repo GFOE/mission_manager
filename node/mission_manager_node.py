@@ -195,11 +195,10 @@ class MissionManagerCore(object):
             print(item)
             if item['type'] == 'Platform':
                 speed = item['speed']*0.514444  # knots to m/s
-                current_item['default_speed'] = speed
             if item['type'] in ('SurveyPattern', 'TrackLine', 'SurveyArea'):
                 current_item = {'type':'mission_plan',
                     'nav_objectives':[],
-                    'default_speed':default_speed,
+                    'default_speed':speed,
                     'do_transit':True,
                     'current_nav_objective_index':0
                     }
