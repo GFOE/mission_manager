@@ -153,22 +153,23 @@ class MissionManagerCore(object):
         print(parts)
         if len(parts) == 2:
             task_type = parts[0]
-            task = None
+            task_list = []
             if task_type == 'mission_plan':
-                task = self.parseMission(parts[1])
+                task_list = self.parseMission(json.loads(parts[1]), self.default_speed)
             if task_type == 'goto':
                 task = self.parseLatLong(args)
                 if task is not None:
                     task['type'] = 'goto'
+                    task_list.append(task)
             if task_type == 'hover':
                 task = self.parseLatLong(args)
                 if task is not None:
                     task['type'] = 'hover'
-            if task is not None: 
-                if prepend:
-                    self.tasks.insert(0,task)
-                else:
-                    self.tasks.append(task)
+                    task_list.append(task)
+            if prepend:
+                self.tasks = task_list + self.tasks
+            else:
+                self.tasks += task_list
         print('tasks')
         print(self.tasks)
 
@@ -186,31 +187,37 @@ class MissionManagerCore(object):
             except ValueError:
                 return None
         
-    def parseMission(self, mp):
-        ret = {'type':'mission_plan',
-               'nav_objectives':[],
-               'default_speed':self.default_speed,
-               'do_transit':True
-               }
-        
-        plan = json.loads(mp)
+    def parseMission(self, plan, default_speed):
+        ret = []
+        speed = default_speed
         
         for item in plan:
             print(item)
             if item['type'] == 'Platform':
-                ret['default_speed'] = item['speed']*0.514444  # knots to m/s
-            if item['type'] == 'SurveyPattern':
-                for c in item['children']:
-                    ret['nav_objectives'].append(c)
-                ret['label'] = item['label']
-            if item['type'] == 'TrackLine':
-                ret['nav_objectives'].append(item)
-                ret['label'] = item['label']
-            if item['type'] == 'SurveyArea':
-                ret['nav_objectives'].append(item)
-                ret['label'] = item['label']
-        
-        ret['current_nav_objective_index'] = 0
+                speed = item['speed']*0.514444  # knots to m/s
+                current_item['default_speed'] = speed
+            if item['type'] in ('SurveyPattern', 'TrackLine', 'SurveyArea'):
+                current_item = {'type':'mission_plan',
+                    'nav_objectives':[],
+                    'default_speed':default_speed,
+                    'do_transit':True,
+                    'current_nav_objective_index':0
+                    }
+                if item['type'] == 'SurveyPattern':
+                    for c in item['children']:
+                        current_item['nav_objectives'].append(c)
+                    current_item['label'] = item['label']
+                if item['type'] == 'TrackLine':
+                    current_item['nav_objectives'].append(item)
+                    current_item['label'] = item['label']
+                if item['type'] == 'SurveyArea':
+                    current_item['nav_objectives'].append(item)
+                    current_item['label'] = item['label']
+                ret.append(current_item)
+            if item['type'] == 'Group':
+                group_items = self.parseMission(item['children'], speed)
+                ret += group_items
+
         return ret
 
     def position(self):
@@ -441,8 +448,13 @@ class MissionManagerCore(object):
                         gvpl.color.g = 0.4
                         gvpl.color.b = 0.4
                         gvpl.size = 2
-                        for p in self.generatePath(lastPosition['latitude'], lastPosition['longitude'], lastHeading, wp1['latitude'], wp1['longitude'], nextHeading):
+                        pre_start = project11.geodesic.direct(math.radians(wp1['longitude']), math.radians(wp1['latitude']), math.radians(nextHeading+180), self.lineup_distance)
+                        for p in self.generatePath(lastPosition['latitude'], lastPosition['longitude'], lastHeading, math.degrees(pre_start[1]), math.degrees(pre_start[0]), nextHeading):
                             gvpl.points.append(p.position)
+                        gp = GeoPoint()
+                        gp.latitude = wp1['latitude']
+                        gp.longitude = wp1['longitude']
+                        gvpl.points.append(gp)
                         gvi.lines.append(gvpl)
                     if len(nav_o['waypoints']):
                         gvpl = GeoVizPointList() # track line
