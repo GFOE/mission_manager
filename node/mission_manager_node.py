@@ -210,9 +210,17 @@ class MissionManagerCore(object):
                     current_item['nav_objectives'].append(item)
                     current_item['label'] = item['label']
                 if item['type'] == 'SurveyArea':
-                    current_item['nav_objectives'].append(item)
-                    current_item['label'] = item['label']
-                ret.append(current_item)
+                    for c in item['children']:
+                        if c['type'] != 'Waypoint':
+                            current_item = None
+                            break
+                    if current_item is None:
+                        ret += self.parseMission(item['children'], speed)
+                    else:
+                        current_item['nav_objectives'].append(item)
+                        current_item['label'] = item['label']
+                if current_item is not None:
+                    ret.append(current_item)
             if item['type'] == 'Group':
                 group_items = self.parseMission(item['children'], speed)
                 ret += group_items
@@ -738,11 +746,12 @@ class SurveyArea(MMState):
         if task is not None:
             goal = manda_coverage.msg.manda_coverageGoal()
             for wp in task['nav_objectives'][task['current_nav_objective_index']]['children']:
-                print(wp)
-                gp = GeoPoint()
-                gp.latitude = wp['latitude']
-                gp.longitude = wp['longitude']
-                goal.area.append(gp)
+                #print(wp)
+                if wp["type"] == 'Waypoint':
+                    gp = GeoPoint()
+                    gp.latitude = wp['latitude']
+                    gp.longitude = wp['longitude']
+                    goal.area.append(gp)
             goal.speed = task['default_speed']
             self.task_complete = False
             self.survey_area_client.wait_for_server()
