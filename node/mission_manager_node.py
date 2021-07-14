@@ -1,8 +1,5 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-from __future__ import print_function
-from builtins import str
-from builtins import object
 import rospy
 import smach
 import smach_ros
