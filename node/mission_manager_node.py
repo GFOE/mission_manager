@@ -242,6 +242,8 @@ class MissionManagerCore(object):
       
     def distanceTo(self, lat, lon):
       p_rad = self.position()
+      if p_rad is None:
+          return None
       current_lat_rad = p_rad[0]
       current_lon_rad = p_rad[1]
       target_lat_rad = math.radians(lat)
@@ -250,7 +252,10 @@ class MissionManagerCore(object):
       return distance
 
     def waypointReached(self, lat, lon):
-      return self.distanceTo(lat, lon) < self.waypointThreshold
+      d = self.distanceTo(lat, lon)
+      if d is None:
+        return False
+      return d < self.waypointThreshold
 
     def generatePathFromVehicle(self, targetLat, targetLon, targetHeading):
       p = self.position()
@@ -555,6 +560,8 @@ class Hover(MMState):
             if not self.missionManager.waypointReached(task['latitude'],task['longitude']):
                 path = []
                 p = self.missionManager.position()
+                if p is None:
+                  return 'cancelled'
                 gp = GeoPose()
                 gp.position.latitude = math.degrees(p[0])
                 gp.position.longitude = math.degrees(p[1])
