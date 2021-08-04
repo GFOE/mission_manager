@@ -52,7 +52,7 @@ class MissionManagerCore(object):
         self.done_behavior = 'hover'
         
         rospy.Subscriber('project11/piloting_mode', String, self.pilotingModeCallback, queue_size = 1)
-        rospy.Subscriber('odom', Odometry, self.odometryCallback, queue_size = 1)
+        rospy.Subscriber('project11/odom', Odometry, self.odometryCallback, queue_size = 1)
         rospy.Subscriber('project11/mission_manager/command', String, self.commandCallback, queue_size = 1)
         rospy.Subscriber('project11/heartbeat', Heartbeat, self.heartbeatCallback, queue_size = 1)
 
