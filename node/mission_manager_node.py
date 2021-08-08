@@ -4,14 +4,34 @@ Mission Manager
 
 Subscribes:
 
-* "project11/piloting_mode" with String
+* "project11/piloting_mode" with String - used to change piloting mode.
 * "odom" with Odometry
-* "project11/mission_manager/command" with String
-* "project11/heartbeat" with Heartbeat
+* "project11/mission_manager/command" with String - See commands notes below.
+* "project11/heartbeat" with Heartbeat - can also be used to change piloting mode.
 
 Publishes:
 
 * "project11/status/mission_manager" with Heartbeat 
+
+Dynamic Reconfiguration:
+Uses reconfiguration server for parameters - see mission_manager/cfg 
+
+Commands:
+A "command" is sent as a String and includes a command and an optional argument, separated by whitespace. 
+command strings include the following:
+
+* replace_task:
+* append_task:
+* prepend_task:
+* clear_tasks:
+* next_task:
+* prev_task:
+* goto_task:
+* goto_line:
+* start_line:
+* restart_mission:
+* override:
+
 '''
 
 import rospy
@@ -56,6 +76,8 @@ class MissionManagerCore(object):
         '''
         Initializes task accounting attributes.
         Creates subscribers.
+        Initiated dynamic reconfiguration
+        Starts tf2 transform listener.
         '''
         self.piloting_mode = 'standby'
         self.odometry = None
@@ -95,17 +117,29 @@ class MissionManagerCore(object):
         self.listener = tf2_ros.TransformListener(self.tfBuffer)
 
     def pilotingModeCallback(self, msg):
+        '''
+        To change piloting mode to value given by String
+        '''
         self.piloting_mode = msg.data
 
     def heartbeatCallback(self, msg):
+        '''
+        Can also change piloting mode this way.
+        '''
         for kv in msg.values:
             if kv.key == 'piloting_mode':
                 self.piloting_mode = kv.value
             
     def odometryCallback(self, msg):
+        '''
+        Stores navigation Odometry
+        '''
         self.odometry = msg
         
     def reconfigure_callback(self, config, level):
+        '''
+        Ingest dynamic reconfiguration.
+        '''
         self.waypointThreshold = config['waypoint_threshold']
         self.turnRadius = config['turn_radius']
         self.segmentLength = config['segment_length']
@@ -122,9 +156,16 @@ class MissionManagerCore(object):
         return config
         
     def getPilotingMode(self):
+        '''
+        Access method - seems not terribly useful since Python doesn't 
+        have private attributes.
+        '''
         return self.piloting_mode
     
     def commandCallback(self, msg):
+        '''
+        Receives command String
+        '''
         parts = msg.data.split(None,1)
         cmd = parts[0]
         if len(parts) > 1:
@@ -138,21 +179,16 @@ class MissionManagerCore(object):
             self.clearTasks()
             self.addTask(args)
             self.pending_command = 'next_task'
-            
-        if cmd == 'append_task':
+        elif cmd == 'append_task':
             self.addTask(args)
-
-        if cmd == 'prepend_task':
+        elif cmd == 'prepend_task':
             self.addTask(args, True)
-            
-        if cmd == 'clear_tasks':
+        elif cmd == 'clear_tasks':
             self.clearTasks()
-            
-        if cmd in ('next_task','prev_task','goto_task','goto_line', 'start_line', 'restart_mission'):
+        elif cmd in ('next_task','prev_task','goto_task',
+                   'goto_line', 'start_line', 'restart_mission'):
             self.pending_command  = msg.data
-
-        
-        if cmd == 'override':
+        elif cmd == 'override':
             parts = args.split(None,1)
             if len(parts) == 2:
                 task_type = parts[0]   
@@ -167,14 +203,36 @@ class MissionManagerCore(object):
                         task['type'] = 'hover'
                 if task is not None:
                     self.setOverride(task)
+        else:
+            rospy.logerr("mission_manager: No defined action for the "
+                         "received command <%s> - ignoring!"%msg.data)
+        
 
     def clearTasks(self):
+        '''
+        Empties the tasks list and sets current_task to None
+        Called with a command of "clear_task" or "replace_task" is received.
+        '''
         self.tasks = []
         self.current_task = None
 
     def addTask(self, args, prepend=False):
+        '''
+        Appends or prepends an element to the "tasks" list attribute.
+        Called when "append_task" or "prepend_task" commands are received.
+
+        The "args" string specifies the additional task information for 
+        additional tasks.
+        args = "task_type task_args"
+        where the following task_types
+        * mission_plan: task_args contain a "mission" in json format.
+        * goto: task_args contains latitude and longitude in decimal degres.
+        * hover: task_args same as goto
+        
+        :param str args: The remainder of the string sent with the command.
+        '''
         parts = args.split(None,1)
-        print(parts)
+        rospy.loginfo("mission_manager: Adding task with arguments: %s"%parts)
         if len(parts) == 2:
             task_type = parts[0]
             task = None
@@ -193,24 +251,47 @@ class MissionManagerCore(object):
                     self.tasks.insert(0,task)
                 else:
                     self.tasks.append(task)
-        print('tasks')
-        print(self.tasks)
+        rospy.loginfo('tasks')
+        rospy.loginfo(self.tasks)
 
     def setOverride(self, task):
         self.override_task = task
         self.pending_command = 'do_override'
         
     def parseLatLong(self,args):
+        '''
+        Splits a string in two and crates a dictionary with 
+        latitude and longitude keys and float values.
+        
+        :param str args: Should be a string of two float numbers 
+                         separated by whitespace.  Order matters.
+
+        '''
         latlon = args.split()
-        if len(latlon) >= 2:
+        if len(latlon) == 2:
             try:
                 lat = float(latlon[0])
                 lon = float(latlon[1])
                 return {'latitude':lat, 'longitude':lon}
             except ValueError:
+                rospy.logerr("mission_manager: Cannot convert the command "
+                             "arguments <%s> into two floats!"%args)
                 return None
+        else:
+            rospy.logerr("mission_manager: Cannot split the command "
+                         "arguments <%s> into exactly two elements!"%args)
+
+        return None
         
     def parseMission(self, mp):
+        '''
+        Create a task dict from a json description.
+        Called when a "mission_plan" command is received.
+
+        :param str: json formatted description of a mission. 
+        :return: Task dictionary for mission as described by mp json
+        :rtype: dict
+        '''
         ret = {'type':'mission_plan',
                'nav_objectives':[],
                'default_speed':self.default_speed,
@@ -220,7 +301,7 @@ class MissionManagerCore(object):
         plan = json.loads(mp)
         
         for item in plan:
-            print(item)
+            rospy.loginfo("mission_manager: Parsing new mission item <%s>"%item)
             if item['type'] == 'Platform':
                 ret['default_speed'] = item['speed']*0.514444  # knots to m/s
             if item['type'] == 'SurveyPattern':
@@ -242,7 +323,7 @@ class MissionManagerCore(object):
         try:
           odom_to_earth = self.tfBuffer.lookup_transform("earth", self.odometry.header.frame_id, rospy.Time())
         except Exception as e:
-          print(e)
+          rospy.loginfo(e)
           return
         ecef = do_transform_pose(self.odometry.pose, odom_to_earth).pose.position
         return project11.wgs84.fromECEFtoLatLong(ecef.x, ecef.y, ecef.z)
@@ -265,11 +346,11 @@ class MissionManagerCore(object):
     def generatePathFromVehicle(self, targetLat, targetLon, targetHeading):
       p = self.position()
       h = self.heading()
-      #print('generatePathFromVehicle',p,h)
+      #rospy.loginfo('generatePathFromVehicle',p,h)
       return self.generatePath(math.degrees(p[0]), math.degrees(p[1]), h, targetLat, targetLon, targetHeading)
 
     def generatePath(self, startLat, startLon, startHeading, targetLat, targetLon, targetHeading):
-        #print('generatePath: from:',startLat,startLon,'to:',targetLat,targetLon)
+        #rospy.loginfo('generatePath: from:',startLat,startLon,'to:',targetLat,targetLon)
         rospy.wait_for_service('dubins_curves_latlong')
         dubins_service = rospy.ServiceProxy('dubins_curves_latlong', DubinsCurvesLatLong)
 
@@ -334,7 +415,7 @@ class MissionManagerCore(object):
 
     def nextTask(self):
         if self.pending_command is not None:
-            print('nextTask: pending_command:',self.pending_command)
+            rospy.loginfo('nextTask: pending_command:',self.pending_command)
         if self.pending_command == 'do_override':
             if self.current_task is not None and self.current_task['type'] == 'mission_plan':
                 self.current_task['current_path'] = None
@@ -368,7 +449,7 @@ class MissionManagerCore(object):
                 else:
                     try:
                         i = self.tasks.index(self.current_task)
-                        print('nextTask: current task index:',i)
+                        rospy.loginfo('nextTask: current task index:',i)
                         if self.pending_command == 'next_task':
                             i += 1
                             if i >= len(self.tasks):
@@ -382,7 +463,7 @@ class MissionManagerCore(object):
                             else:
                                 self.current_task = self.tasks[i]
                     except ValueError:
-                        print("nextTask: can't find current task index!")
+                        rospy.loginfo("nextTask: can't find current task index!")
                         self.current_task = None
                     if self.current_task is None: #end of the list or error figuring out where in the list we were.
                         if self.done_behavior == 'restart':
@@ -553,7 +634,7 @@ class MissionPlan(MMState):
 
     def generatePaths(self, task):
         path = []
-        print(task['nav_objectives'])
+        rospy.loginfo(task['nav_objectives'])
         for p in task['nav_objectives'][task['current_nav_objective_index']]['waypoints']:
             #path.append((p['position']['latitude'],p['position']['longitude']))
             gp = GeoPose();
@@ -666,7 +747,7 @@ class SurveyArea(MMState):
         if task is not None:
             goal = manda_coverage.msg.manda_coverageGoal()
             for wp in task['nav_objectives'][task['current_nav_objective_index']]['children']:
-                print(wp)
+                rospy.loginfo(wp)
                 gp = GeoPoint()
                 gp.latitude = wp['latitude']
                 gp.longitude = wp['longitude']
