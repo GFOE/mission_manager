@@ -329,37 +329,42 @@ class MissionManagerCore(object):
         return ret
 
     def position(self):
-      if self.odometry is not None:
-        try:
-          odom_to_earth = self.tfBuffer.lookup_transform("earth", self.odometry.header.frame_id, rospy.Time())
-        except Exception as e:
-          rospy.loginfo(e)
-          return
-        ecef = do_transform_pose(self.odometry.pose, odom_to_earth).pose.position
-        return project11.wgs84.fromECEFtoLatLong(ecef.x, ecef.y, ecef.z)
+        if self.odometry is not None:
+            try:
+                odom_to_earth = self.tfBuffer.lookup_transform("earth", self.odometry.header.frame_id, rospy.Time())
+            except Exception as e:
+                rospy.loginfo(e)
+                return
+            ecef = do_transform_pose(self.odometry.pose, odom_to_earth).pose.position
+            return project11.wgs84.fromECEFtoLatLong(ecef.x, ecef.y, ecef.z)
 
     def heading(self):
-      if self.odometry is not None:
-        o = self.odometry.pose.pose.orientation
-        q = (o.x, o.y, o.z, o.w)
-        return 90-math.degrees(euler_from_quaternion(q)[2])
+        if self.odometry is not None:
+            o = self.odometry.pose.pose.orientation
+            q = (o.x, o.y, o.z, o.w)
+            return 90-math.degrees(euler_from_quaternion(q)[2])
       
     def distanceTo(self, lat, lon):
-      p_rad = self.position()
-      current_lat_rad = p_rad[0]
-      current_lon_rad = p_rad[1]
-      target_lat_rad = math.radians(lat)
-      target_lon_rad = math.radians(lon)
-      azimuth, distance = project11.geodesic.inverse(current_lon_rad, current_lat_rad, target_lon_rad, target_lat_rad)
+        p_rad = self.position()
+        current_lat_rad = p_rad[0]
+        current_lon_rad = p_rad[1]
+        target_lat_rad = math.radians(lat)
+        target_lon_rad = math.radians(lon)
+        azimuth, distance = project11.geodesic.inverse(current_lon_rad,
+                                                       current_lat_rad,
+                                                       target_lon_rad,
+                                                       target_lat_rad)
       return distance
 
     def generatePathFromVehicle(self, targetLat, targetLon, targetHeading):
-      p = self.position()
-      h = self.heading()
-      #rospy.loginfo('generatePathFromVehicle',p,h)
-      return self.generatePath(math.degrees(p[0]), math.degrees(p[1]), h, targetLat, targetLon, targetHeading)
+        p = self.position()
+        h = self.heading()
+        #rospy.loginfo('generatePathFromVehicle',p,h)
+        return self.generatePath(math.degrees(p[0]), math.degrees(p[1]),
+                                 h, targetLat, targetLon, targetHeading)
 
-    def generatePath(self, startLat, startLon, startHeading, targetLat, targetLon, targetHeading):
+    def generatePath(self, startLat, startLon, startHeading,
+                     targetLat, targetLon, targetHeading):
         #rospy.loginfo('generatePath: from:',startLat,startLon,'to:',targetLat,targetLon)
         rospy.wait_for_service('dubins_curves_latlong')
         dubins_service = rospy.ServiceProxy('dubins_curves_latlong', DubinsCurvesLatLong)
@@ -404,10 +409,12 @@ class MissionManagerCore(object):
         return math.degrees(path_azimuth)
 
     def headingToPoint(self,lat,lon):
-      p = self.position()
-      dest_lat_rad = math.radians(lat)
-      dest_lon_rad = math.radians(lon)
-      azimuth, distance = project11.geodesic.inverse(p[1], p[0], dest_lon_rad, dest_lat_rad)
+        p = self.position()
+        dest_lat_rad = math.radians(lat)
+        dest_lon_rad = math.radians(lon)
+        azimuth, distance = project11.geodesic.inverse(p[1], p[0],
+                                                       dest_lon_rad,
+                                                       dest_lat_rad)
       return math.degrees(azimuth)
     
     def headingToYaw(self, heading):
@@ -488,7 +495,11 @@ class MissionManagerCore(object):
                     self.current_task['current_path'] = None
 
                     
-        if self.current_task is not None and self.current_task['type'] == 'mission_plan' and (self.pending_command is not None and ( self.pending_command.startswith('goto_line') or self.pending_command.startswith('start_line'))):
+        if (self.current_task is not None and
+            self.current_task['type'] == 'mission_plan' and
+            (self.pending_command is not None and
+             ( self.pending_command.startswith('goto_line') or
+               self.pending_command.startswith('start_line')))):
             parts = self.pending_command.strip().split(None,1)
             if len(parts) == 2:
                 cmd = parts[0]
