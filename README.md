@@ -66,4 +66,8 @@ The state string (see above)
 
 Length of the tasks list in the mission_manager object - as a string of course.
 
+# Pending Command Strings
 
+The `pending_command` attribute of the MissionManagerCore object is a string.  Enumeration and explanation of the strings are aas follows:
+
+## do_override

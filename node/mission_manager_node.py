@@ -82,8 +82,11 @@ class MissionManagerCore(object):
         self.piloting_mode = 'standby'
         self.odometry = None
 
-        # List of tasks to do, or already done.
-        # Keeping all the tasks allows us to run them in a loop
+        ''' 
+        List of tasks to do, or already done.
+        Keeping all the tasks allows us to run them in a loop
+        Elements of the list are dictionary objects - see addTask()
+        '''
         self.tasks = []
         # List of tasks to be done. Once a task is completed,
         # it is dropped from this list. Overrides get prepended here.
@@ -227,7 +230,11 @@ class MissionManagerCore(object):
         Appends or prepends an element to the "tasks" list attribute.
         Called when "append_task" or "prepend_task" commands are received.
 
-        :param str args: The remainder of the string sent with the command.
+        Tasks are dictionaries with a variety of keys.  Each dictionary 
+        includes a 'type' key.
+
+        :param str args: The task definition string (see README.md)
+                         The remainder of the string sent with the command.
                          See README.md for task string syntax.
         '''
         parts = args.split(None,1)
@@ -261,8 +268,7 @@ class MissionManagerCore(object):
             rospy.logerr("mission_manager: Task string <%s> was not "
                          "split into exactly two parts.  No task added!")
             
-        rospy.loginfo('tasks')
-        rospy.loginfo(self.tasks)
+        rospy.loginfo('mission_manager: tasks : %s'%str(self.tasks))
 
     def setOverride(self, task):
         self.override_task = task
@@ -487,9 +493,11 @@ class MissionManagerCore(object):
         :returns path: as an array of geographic_msgs/GeoPose objects
         :rtype geographic_msgs/GeoPose[]
         '''
-        #rospy.loginfo('generatePath: from:',startLat,startLon,'to:',targetLat,targetLon)
+        #rospy.loginfo('generatePath: from:',startLat,startLon,
+        #   'to:',targetLat,targetLon)
         rospy.wait_for_service('dubins_curves_latlong')
-        dubins_service = rospy.ServiceProxy('dubins_curves_latlong', DubinsCurvesLatLong)
+        dubins_service = rospy.ServiceProxy('dubins_curves_latlong',
+                                            DubinsCurvesLatLong)
 
         # Setup service request
         dubins_req = DubinsCurvesLatLongRequest()
@@ -527,7 +535,7 @@ class MissionManagerCore(object):
         
         # Return the service output
         rospy.loginfo("mission_manager: Generated the following Dubins path: "
-                      "%s"%str(dubins_path)
+                      "%s"%str(dubins_path))
         return dubins_path.path
 
     def segmentHeading(self, start_lat, start_lon, dest_lat, dest_lon):
@@ -564,24 +572,45 @@ class MissionManagerCore(object):
 
     def iterate(self, current_state):
         '''
+        
+        TODO: Returning either a string or None is ill-defined and confusing.
+        
+        TODO: Create more consist return strings. E.g., if they are going to be
+        phrased as commands, they should be {exit, pause, cancel}.
+
         :param str current_state
+        :returns String to communicate to state class what to do next
+                 OR None
         '''
         if rospy.is_shutdown():
+            rospy.loginfo("mission_manager: ROS is shutdown, so telling "
+                          "state to 'exit'")
             return 'exit'
         if self.getPilotingMode() != 'autonomous':
+            rospy.loginfo("mission_manager: Piloting mode is not "
+                          "'autonomous', but instead is <%s>, "
+                          "so telling state to 'pause'"%self.piloting_mode)
             return 'pause'
         if self.pending_command is not None:
+            rospy.loginfo("mission_manager: There is no pending_command, "
+                          "so telling the state 'cancelled'")
             return 'cancelled'
-        # Publish the Heartbeat message - 
+        # Publish the Heartbeat message
+        # TODO: Why not publish status if one of the above conditions are met?
         self.publishStatus(current_state)
         # TODO: Why this fixed sleep?  Need to improve and parameterize.
         rospy.sleep(0.1)
+        return None          
 
     def nextTask(self):
-        if self.pending_command is not None:
-            rospy.loginfo('nextTask: pending_command:',self.pending_command)
+        '''
+        '''
+        rospy.loginfo('nextTask: pending_command:',str(self.pending_command))
+
+        
         if self.pending_command == 'do_override':
-            if self.current_task is not None and self.current_task['type'] == 'mission_plan':
+            if ( (self.current_task is not None) and
+                 (self.current_task['type'] == 'mission_plan'):
                 self.current_task['current_path'] = None
             self.saved_task = self.current_task
             self.pending_command = None
