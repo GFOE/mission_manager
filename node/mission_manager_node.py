@@ -272,10 +272,14 @@ class MissionManagerCore(object):
         '''
         Splits a string in two and crates a dictionary with 
         latitude and longitude keys and float values.
-        
+
+        TODO: No reason this should be a method of the object.
+              Should be a function.
+
         :param str args: Should be a string of two float numbers 
                          separated by whitespace.  Order matters.
-
+        :returns Dict with key/values for latitude and longitude
+        :rtype dict
         '''
         latlon = args.split()
         if len(latlon) == 2:
@@ -297,6 +301,9 @@ class MissionManagerCore(object):
         '''
         Create a task dict from a json description.
         Called when a "mission_plan" command is received.
+
+        TODO: No reason this should be a method of the object.
+              Should be a function.
 
         :param str: json formatted description of a mission. 
         :return: Task dictionary for mission as described by mp json
@@ -329,22 +336,71 @@ class MissionManagerCore(object):
         return ret
 
     def position(self):
-        if self.odometry is not None:
-            try:
-                odom_to_earth = self.tfBuffer.lookup_transform("earth", self.odometry.header.frame_id, rospy.Time())
-            except Exception as e:
-                rospy.loginfo(e)
-                return
-            ecef = do_transform_pose(self.odometry.pose, odom_to_earth).pose.position
-            return project11.wgs84.fromECEFtoLatLong(ecef.x, ecef.y, ecef.z)
+        '''
+        Return position lat/lon.
+
+        TODO: This should not be a method of the object.  Should be a general
+              purpose function, probably in project11 module.  
+              Not specific to this program.
+
+        Position is determined as...
+        1. Use the frame_id value in the odometry message to lookup the 
+        tf transfrom from the "earth" frame to the frame_id.  
+        2. Transform odometry.pose to ECEF frame
+        2. The wgs84.py module from project11 is used to transfrom 
+        ECEF -> lat/lon
+
+        :returns Lat/Long in radians and altitude in meters.
+        :rtype tuple 
+        '''
+        if self.odometry is None:
+            rospy.logwarn("mission_manager: There is no current odomentry, "
+                          "so can't determine position!")
+            return None
+        
+        try:
+            odom_to_earth = self.tfBuffer.lookup_transform("earth", self.odometry.header.frame_id, rospy.Time())
+        except Exception as e:
+            rospy.logerr("mission_manager: Cannot lookup transform from <earth>"
+                         " to odometry frame_id")
+            rospy.logerr(e)
+            return None
+        # Function from tf2_geoemetry_msgs
+        ecef = do_transform_pose(self.odometry.pose, odom_to_earth).pose.position
+        return project11.wgs84.fromECEFtoLatLong(ecef.x, ecef.y, ecef.z)
 
     def heading(self):
+        '''
+        Uses current odometry message to return heading in degrees NED.
+
+        TODO: This should not be a method of the object.  Should be a general
+              purpose function, probably in project11 module.  
+              Not specific to this program.
+
+        :returns heading, degrees, NED.
+        :rtype float
+        '''
+        
         if self.odometry is not None:
             o = self.odometry.pose.pose.orientation
             q = (o.x, o.y, o.z, o.w)
-            return 90-math.degrees(euler_from_quaternion(q)[2])
+            return 90.0-math.degrees(euler_from_quaternion(q)[2])
       
     def distanceTo(self, lat, lon):
+        '''
+        Uses position() function and lat/lon arguments to report 
+        distance in meters.
+
+        TODO: This should not be a method of the object.  Should be a general
+              purpose function, probably in project11 module.  
+              Not specific to this program.
+
+        :param float lat: latitude, degrees
+        :param float lon: longitude, degrees
+        :returns distance in meters 
+                 from current position (lat, lon)  to lat, lon)
+        :rytpe float
+        '''
         p_rad = self.position()
         current_lat_rad = p_rad[0]
         current_lon_rad = p_rad[1]
@@ -354,9 +410,55 @@ class MissionManagerCore(object):
                                                        current_lat_rad,
                                                        target_lon_rad,
                                                        target_lat_rad)
-      return distance
+        return distance
 
+    def headingToPoint(self,lat,lon):
+        '''
+        Uses position() function output and lat/lon to report
+        bearing from current position to lat/lon.
+
+        TODO: This should not be a method of the object.  Should be a general
+              purpose function, probably in project11 module.  
+              Not specific to this program.
+
+        TODO: This should be combined wtih distanceTo - make one unifying 
+              underyling set of function calls.
+
+        TODO: Change name of headingToPoint() and/or distanceTo() functions to 
+              be consistent.
+
+        :param float lat: latitude, degrees
+        :param float lon: longitude, degrees
+        :returns bearing to target lat/lon, degrees, NED.
+        :rytpe float
+        '''
+        p = self.position()
+        dest_lat_rad = math.radians(lat)
+        dest_lon_rad = math.radians(lon)
+        azimuth, distance = project11.geodesic.inverse(p[1], p[0],
+                                                       dest_lon_rad,
+                                                       dest_lat_rad)
+        return math.degrees(azimuth)
+    
     def generatePathFromVehicle(self, targetLat, targetLon, targetHeading):
+        '''
+        Wraps geneatePath() to create path from current position/heading
+        to target position/heading
+
+        TODO: This should not be a method of the object.  Should be a general
+              purpose function, probably in project11 module.  
+              Not specific to this program.
+
+        TODO: Should be more specific name, such as 
+              generateDubinsPathFromVehicle()
+
+        :param float targetLat: Latitude - believe in radians?
+        :param float targetLon: Longitude - believe in radians?
+        :param float targetHeading: Degrees, NED
+        :returns path: as an array of geographic_msgs/GeoPose objects
+        :rtype geographic_msgs/GeoPose[]
+        '''
+        
         p = self.position()
         h = self.heading()
         #rospy.loginfo('generatePathFromVehicle',p,h)
@@ -365,12 +467,36 @@ class MissionManagerCore(object):
 
     def generatePath(self, startLat, startLon, startHeading,
                      targetLat, targetLon, targetHeading):
+        '''
+        Uses the dubins_curves ROS project services to create a path
+        from start to target.
+
+        TODO: This should not be a method of the object.  Should be a general
+              purpose function, probably in project11 module.  
+              Not specific to this program.
+
+        TODO: Should be more specific name, such as 
+              generateDubinsPath()
+
+        :param float startLat: Latitude - believe in radians?
+        :param float startLon: Longitude - believe in radians?
+        :param float startHeading: degrees, NED.
+        :param float targetLat: Latitude - believe in radians?
+        :param float targetLon: Longitude - believe in radians?
+        :param float targetHeading: degrees, NED.
+        :returns path: as an array of geographic_msgs/GeoPose objects
+        :rtype geographic_msgs/GeoPose[]
+        '''
         #rospy.loginfo('generatePath: from:',startLat,startLon,'to:',targetLat,targetLon)
         rospy.wait_for_service('dubins_curves_latlong')
         dubins_service = rospy.ServiceProxy('dubins_curves_latlong', DubinsCurvesLatLong)
 
+        # Setup service request
         dubins_req = DubinsCurvesLatLongRequest()
+        # See cfg/mission_manager.cfg for more verbose explanations
+        # Dynamic reconfig param - typ. 10.0 m 
         dubins_req.radius = self.turnRadius
+        # Dynamic reconfig param - typ. 5 m 
         dubins_req.samplingInterval = self.segmentLength
 
         dubins_req.startGeoPose.position.latitude = startLat
@@ -393,41 +519,62 @@ class MissionManagerCore(object):
         dubins_req.targetGeoPose.orientation.z = q[2]
         dubins_req.targetGeoPose.orientation.w = q[3]
 
-        #print dubins_req
+        
+        # Call the service
+        rospy.loginfo("mission_manager: Calling Dubins path service with "
+                      "request: %s"%str(dubins_req))
         dubins_path = dubins_service(dubins_req)
-        #print (dubins_path)
+        
+        # Return the service output
+        rospy.loginfo("mission_manager: Generated the following Dubins path: "
+                      "%s"%str(dubins_path)
         return dubins_path.path
 
-    def segmentHeading(self,lat1,lon1,lat2,lon2):
-        start_lat_rad = math.radians(lat1)
-        start_lon_rad = math.radians(lon1)
+    def segmentHeading(self, start_lat, start_lon, dest_lat, dest_lon):
+        '''
+        
+        TODO: This should not be a method of the object.  Should be a general
+              purpose function, probably in project11 module.  
+              Not specific to this program.
 
-        dest_lat_rad = math.radians(lat2)
-        dest_lon_rad = math.radians(lon2)
+        :param float start_lat: starting latitude, degrees
+        :returns Bearing from start lat/lon to dest lat/lon, degrees, NED.
+        '''
+        start_lat_rad = math.radians(start_lat)
+        start_lon_rad = math.radians(start_lon)
+
+        dest_lat_rad = math.radians(dest_lat)
+        dest_lon_rad = math.radians(dest_lon)
         
         path_azimuth, path_distance = project11.geodesic.inverse(start_lon_rad, start_lat_rad, dest_lon_rad, dest_lat_rad)
         return math.degrees(path_azimuth)
 
-    def headingToPoint(self,lat,lon):
-        p = self.position()
-        dest_lat_rad = math.radians(lat)
-        dest_lon_rad = math.radians(lon)
-        azimuth, distance = project11.geodesic.inverse(p[1], p[0],
-                                                       dest_lon_rad,
-                                                       dest_lat_rad)
-      return math.degrees(azimuth)
-    
     def headingToYaw(self, heading):
-        return 90-heading
+        '''
+        Utility function convert heading (degrees, NED) to yaw (degress, ENU)
+
+        TODO: Should not be a method of the object - should be a 
+        utility function in a separate module.
+
+        :param float heading: degrees, NED
+        :returns yaw: degrees, ENU
+        :rtype float
+        '''
+        return 90.0-heading
 
     def iterate(self, current_state):
+        '''
+        :param str current_state
+        '''
         if rospy.is_shutdown():
             return 'exit'
         if self.getPilotingMode() != 'autonomous':
             return 'pause'
         if self.pending_command is not None:
             return 'cancelled'
+        # Publish the Heartbeat message - 
         self.publishStatus(current_state)
+        # TODO: Why this fixed sleep?  Need to improve and parameterize.
         rospy.sleep(0.1)
 
     def nextTask(self):
@@ -523,15 +670,26 @@ class MissionManagerCore(object):
 
     
     def publishStatus(self, state):
+        '''
+        Publish Heatbeat message with mission, task and state information
+        stuffed into the key/value pairs of the message.
+
+        TODO: Add a list of allowable state strings and validate that the 
+              input argument is one one of the allowed states.
+        
+        :param str state: An arbitrary string that is added to the Heartbeat
+                          message as the value associated with key=state.
+        :returns None
+        '''
         hb = Heartbeat()
         hb.header.stamp = rospy.Time.now()
 
         hb.values.append(KeyValue('state',state))
         hb.values.append(KeyValue('tasks_count',str(len(self.tasks))))
-        for t in self.tasks:
-            tstring = t['type']
-            if t['type'] == 'mission_plan' and 'label' in t:
-                tstring += ' ('+t['label']+')'
+        for task in self.tasks:
+            tstring = task['type']
+            if ((task['type'] == 'mission_plan') and ('label' in task)):
+                tstring += ' ('+task['label']+')'
             hb.values.append(KeyValue('-task',tstring))
 
         if self.current_task is None:

@@ -19,10 +19,13 @@ A "command" is sent as a ROS message String and includes a command and an option
 ## cmd = "override"
 
 
-# Task Definition Strings
+# Task Definition Strings and Task Types
 
 Tasks are sent via the Command string interface (and possibly other ways).
 The Task String containts "task_type task_args" deliminted by whitespace, i.e., `task_str = "task_type task_args"`.  The task_types and their task_args are described below.  
+
+Tasks are stored in a list (queue) as the `tasks` attribute of the 
+
 
 ## task_type = "mission_plan"
 
@@ -35,3 +38,32 @@ task_arg = "latitude longitude", where both are in decimal degrees.
 ## hover
 
 task_arg = "latitude longitude", where both are in decimal degrees.
+
+ 
+# State Strings
+
+The "State" (of what, I'm not sure) is reported in the published Heartbeat message as one of the key/value pairs.
+
+Possible states strings and their meanings are...
+
+## Idle
+
+## Hover
+
+## FollowPath
+
+## SurveyArea
+
+# Status Heartbeat Messages
+
+The message includes a number of key/value pairs.  All keys and values are exclusivly strings.  Here are the keys we are aware of...
+
+## state
+
+The state string (see above)
+
+## task_count
+
+Length of the tasks list in the mission_manager object - as a string of course.
+
+
