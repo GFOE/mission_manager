@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+'''
+Mission Manager
+
+Subscribes:
+
+* "project11/piloting_mode" with String
+* "odom" with Odometry
+* "project11/mission_manager/command" with String
+* "project11/heartbeat" with Heartbeat
+
+Publishes:
+
+* "project11/status/mission_manager" with Heartbeat 
+'''
 
 import rospy
 import smach
@@ -35,28 +49,47 @@ import json
 import math
 
 class MissionManagerCore(object):
+    '''
+    Singleton class instantiated by main.
+    '''
     def __init__(self):
+        '''
+        Initializes task accounting attributes.
+        Creates subscribers.
+        '''
         self.piloting_mode = 'standby'
         self.odometry = None
 
-        self.tasks = [] # list of tasks to do, or already done. Keeping all the tasks allows us to run them in a loop
-        #self.pending_tasks = [] # list of tasks to be done. Once a task is completed, it is dropped from this list. Overrides get prepended here.
+        # List of tasks to do, or already done.
+        # Keeping all the tasks allows us to run them in a loop
+        self.tasks = []
+        # List of tasks to be done. Once a task is completed,
+        # it is dropped from this list. Overrides get prepended here.
+        #self.pending_tasks = [] 
         self.current_task = None
-        self.override_task = None # a task that may be added, such as hover, to temporarily interupt current tast.
-        self.saved_task = None # a task that was current when an override task was added
+        # A task that may be added, such as hover,
+        # to temporarily interupt current tast.
+        self.override_task = None
+        # A task that was current when an override task was added
+        self.saved_task = None 
         self.pending_command = None
         
         self.done_behavior = 'hover'
         
-        rospy.Subscriber('project11/piloting_mode', String, self.pilotingModeCallback, queue_size = 1)
-        rospy.Subscriber('odom', Odometry, self.odometryCallback, queue_size = 1)
-        rospy.Subscriber('project11/mission_manager/command', String, self.commandCallback, queue_size = 1)
-        rospy.Subscriber('project11/heartbeat', Heartbeat, self.heartbeatCallback, queue_size = 1)
+        rospy.Subscriber('project11/piloting_mode', String,
+                         self.pilotingModeCallback, queue_size = 1)
+        rospy.Subscriber('odom', Odometry,
+                         self.odometryCallback, queue_size = 1)
+        rospy.Subscriber('project11/mission_manager/command', String,
+                         self.commandCallback, queue_size = 1)
+        rospy.Subscriber('project11/heartbeat', Heartbeat,
+                         self.heartbeatCallback, queue_size = 1)
 
-        
-        self.status_publisher = rospy.Publisher('project11/status/mission_manager', Heartbeat, queue_size = 10)
-
-        self.config_server = Server(mission_managerConfig, self.reconfigure_callback)
+        self.status_publisher = rospy.Publisher('project11/status/mission_manager',
+                                                Heartbeat, queue_size = 10)
+        # Dynamic reconfiguration server.
+        self.config_server = Server(mission_managerConfig,
+                                    self.reconfigure_callback)
         
         self.tfBuffer = tf2_ros.Buffer()
         self.listener = tf2_ros.TransformListener(self.tfBuffer)
@@ -588,11 +621,17 @@ class FollowPath(MMState):
             if self.missionManager.planner == 'path_follower':
                 self.path_planner_client.cancel_goal()
                 self.path_follower_client.wait_for_server()
-                self.path_follower_client.send_goal(goal, self.path_follower_done_callback, self.path_follower_active_callback, self.path_follower_feedback_callback)
+                self.path_follower_client.send_goal(goal,
+                                                    self.path_follower_done_callback,
+                                                    self.path_follower_active_callback,
+                                                    self.path_follower_feedback_callback)
             elif self.missionManager.planner == 'path_planner':
                 self.path_follower_client.cancel_goal()
                 self.path_planner_client.wait_for_server()
-                self.path_planner_client.send_goal(goal, self.path_follower_done_callback, self.path_follower_active_callback, self.path_follower_feedback_callback)
+                self.path_planner_client.send_goal(goal,
+                                                   self.path_follower_done_callback,
+                                                   self.path_follower_active_callback,
+                                                   self.path_follower_feedback_callback)
 
         while True:
             ret = self.missionManager.iterate('FollowPath')
@@ -617,7 +656,8 @@ class FollowPath(MMState):
 
 class SurveyArea(MMState):
     def __init__(self, mm):
-        MMState.__init__(self, mm, outcomes=['done','cancelled','exit','pause'])
+        MMState.__init__(self, mm, outcomes=['done','cancelled',
+                                             'exit','pause'])
         self.survey_area_client = actionlib.SimpleActionClient('survey_area_action', manda_coverage.msg.manda_coverageAction)
         self.task_complete = False
 
@@ -634,7 +674,10 @@ class SurveyArea(MMState):
             goal.speed = task['default_speed']
             self.task_complete = False
             self.survey_area_client.wait_for_server()
-            self.survey_area_client.send_goal(goal, self.survey_area_done_callback, self.survey_area_active_callback, self.survey_area_feedback_callback)
+            self.survey_area_client.send_goal(goal,
+                                              self.survey_area_done_callback,
+                                              self.survey_area_active_callback,
+                                              self.survey_area_feedback_callback)
 
         while True:
             ret = self.missionManager.iterate('SurveyArea')
@@ -656,6 +699,11 @@ class SurveyArea(MMState):
     
     
 def main():
+    '''
+    Main
+
+    Instatiates MissionManagerCore and SMACH state machine(s)
+    '''
     rospy.init_node('MissionManager')
     
     missionManager = MissionManagerCore()
@@ -663,23 +711,49 @@ def main():
     sm_top = smach.StateMachine(outcomes=['exit'])
     
     with sm_top:
-        smach.StateMachine.add('PAUSE', Pause(missionManager), transitions={'resume':'AUTONOMOUS', 'exit':'exit'})
+        smach.StateMachine.add('PAUSE', Pause(missionManager),
+                               transitions={'resume':'AUTONOMOUS',
+                                            'exit':'exit'})
         
         sm_auto = smach.StateMachine(outcomes=['pause','exit'])
         
         with sm_auto:
-            smach.StateMachine.add('IDLE', Idle(missionManager), transitions={'do-task':'NEXTTASK', 'pause':'pause'})
-            smach.StateMachine.add('NEXTTASK', NextTask(missionManager), transitions={'idle':'IDLE', 'mission_plan':'MISSIONPLAN', 'hover':'HOVER', 'goto':'GOTO'})
-            smach.StateMachine.add('HOVER', Hover(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK'})
-            smach.StateMachine.add('MISSIONPLAN', MissionPlan(missionManager), transitions={'done':'NEXTTASK', 'follow_path':'FOLLOWPATH', 'survey_area':'SURVEYAREA'})
-            smach.StateMachine.add('GOTO',Goto(missionManager), transitions={'done':'NEXTTASK', 'follow_path':'FOLLOWPATH'})
-            smach.StateMachine.add('FOLLOWPATH', FollowPath(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK', 'done':'LINEENDED'})
-            smach.StateMachine.add('LINEENDED', LineEnded(missionManager), transitions={'mission_plan': 'MISSIONPLAN', 'next_item':'NEXTTASK'})
-            smach.StateMachine.add('SURVEYAREA', SurveyArea(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK', 'done':'NEXTTASK'})
+            smach.StateMachine.add('IDLE', Idle(missionManager),
+                                   transitions={'do-task':'NEXTTASK',
+                                                'pause':'pause'})
+            smach.StateMachine.add('NEXTTASK', NextTask(missionManager),
+                                   transitions={'idle':'IDLE',
+                                                'mission_plan':'MISSIONPLAN',
+                                                'hover':'HOVER',
+                                                'goto':'GOTO'})
+            smach.StateMachine.add('HOVER', Hover(missionManager),
+                                   transitions={'pause':'pause',
+                                                'cancelled':'NEXTTASK'})
+            smach.StateMachine.add('MISSIONPLAN', MissionPlan(missionManager),
+                                   transitions={'done':'NEXTTASK',
+                                                'follow_path':'FOLLOWPATH',
+                                                'survey_area':'SURVEYAREA'})
+            smach.StateMachine.add('GOTO',Goto(missionManager),
+                                   transitions={'done':'NEXTTASK',
+                                                'follow_path':'FOLLOWPATH'})
+            smach.StateMachine.add('FOLLOWPATH', FollowPath(missionManager),
+                                   transitions={'pause':'pause',
+                                                'cancelled':'NEXTTASK',
+                                                'done':'LINEENDED'})
+            smach.StateMachine.add('LINEENDED', LineEnded(missionManager),
+                                   transitions={'mission_plan': 'MISSIONPLAN',
+                                                'next_item':'NEXTTASK'})
+            smach.StateMachine.add('SURVEYAREA', SurveyArea(missionManager),
+                                   transitions={'pause':'pause',
+                                                'cancelled':'NEXTTASK',
+                                                'done':'NEXTTASK'})
 
-        smach.StateMachine.add('AUTONOMOUS', sm_auto, transitions={'pause':'PAUSE', 'exit':'exit'})
+        smach.StateMachine.add('AUTONOMOUS', sm_auto,
+                               transitions={'pause':'PAUSE',
+                                            'exit':'exit'})
     
-    sis = smach_ros.IntrospectionServer('mission_manager', sm_top, '/mission_manager')
+    sis = smach_ros.IntrospectionServer('mission_manager', sm_top,
+                                        '/mission_manager')
     sis.start()                                                                            
 
     sm_top.execute()
