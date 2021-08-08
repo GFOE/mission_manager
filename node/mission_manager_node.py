@@ -165,7 +165,13 @@ class MissionManagerCore(object):
     def commandCallback(self, msg):
         '''
         Receives command String
+
+        :param String msg: Formated string, delimited by whitespace, describing
+                           task_type and task parameters.
         '''
+
+        rospy.loginfo("mission_manager: Received command: %s"%str(msg))
+        
         parts = msg.data.split(None,1)
         cmd = parts[0]
         if len(parts) > 1:
@@ -221,15 +227,8 @@ class MissionManagerCore(object):
         Appends or prepends an element to the "tasks" list attribute.
         Called when "append_task" or "prepend_task" commands are received.
 
-        The "args" string specifies the additional task information for 
-        additional tasks.
-        args = "task_type task_args"
-        where the following task_types
-        * mission_plan: task_args contain a "mission" in json format.
-        * goto: task_args contains latitude and longitude in decimal degres.
-        * hover: task_args same as goto
-        
         :param str args: The remainder of the string sent with the command.
+                         See README.md for task string syntax.
         '''
         parts = args.split(None,1)
         rospy.loginfo("mission_manager: Adding task with arguments: %s"%parts)
@@ -238,19 +237,30 @@ class MissionManagerCore(object):
             task = None
             if task_type == 'mission_plan':
                 task = self.parseMission(parts[1])
-            if task_type == 'goto':
+            elif task_type == 'goto':
                 task = self.parseLatLong(args)
                 if task is not None:
                     task['type'] = 'goto'
-            if task_type == 'hover':
+            elif task_type == 'hover':
                 task = self.parseLatLong(args)
                 if task is not None:
                     task['type'] = 'hover'
+            else:
+                rospy.logerr("mission_manager: No defined task of type <%s> "
+                             "from task string <%s>"%(task_type, args))
             if task is not None: 
                 if prepend:
                     self.tasks.insert(0,task)
                 else:
                     self.tasks.append(task)
+            else:
+                rospy.logerr("mission_manager: The task string <%s> was "
+                             "not successfully parsed. No task added!"%
+                             args)
+        else:
+            rospy.logerr("mission_manager: Task string <%s> was not "
+                         "split into exactly two parts.  No task added!")
+            
         rospy.loginfo('tasks')
         rospy.loginfo(self.tasks)
 
