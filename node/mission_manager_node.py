@@ -881,7 +881,7 @@ class Hover(MMState):
                       "\t range: %.2f, bearing: %.2f, speed: %.2f"%
                       (feedback.range, feedback.bearing, feedback.speed))
     def callbackDone(self, state, result):
-        rospy.loginfo("mission_manager: hover action dene: \n"
+        rospy.loginfo("mission_manager: hover action done: \n"
                       "\t state: %s ,result: %s"%(str(state),str(result)))
 
 class LineEnded(MMState):
@@ -1054,6 +1054,11 @@ class FollowPath(MMState):
             path follwer action client to use.
             Here we assign the generic 'follower_client' object 
             based on that string.
+
+            TODO: path_follower and path_planner should use the same
+                  action interface.  Currently they each use their own 
+                  interface description.  This interface should be generalized
+                  for future "follower" actions server/clients as well.
             '''
             # Default is path_follower
             follower_client = self.path_follower_client
@@ -1098,23 +1103,28 @@ class FollowPath(MMState):
             if self.task_complete:
                 return 'done'
 
-    def callbackFollowerDone(self, status, result):
-        '''
-        Callback for follower action client interface 
-        '''
-        self.task_complete = True
-    
     def callbackFollowerActive(self):
         '''
         Callback for follower action client interface 
         '''
-        pass
+        rospy.loginfo("mission_manager: follower action client is active.")    
     
-    def callbackFollowerFeedback(self, msg):
+    def callbackFollowerFeedback(self, feedback):
         '''
         Callback for follower action client interface 
         '''
-        pass
+        rospy.loginfo_throttle(2.0, "mission_manager.FollowPath: "
+                               "follower action feedback: "
+                               "%s"%str(feedback))
+    
+    def callbackFollowerDone(self, status, result):
+        '''
+        Callback for follower action client interface 
+        '''
+        rospy.loginfo("mission_manager.FollowPath: follower action done: \n"
+                      "\t status: %s ,result: %s"%(str(status),str(result)))
+        # Tell MissionManagerCore that the task is complete
+        self.task_complete = True
 
 class SurveyArea(MMState):
     def __init__(self, mm):
