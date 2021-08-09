@@ -488,7 +488,14 @@ class MissionManagerCore(object):
         '''
         #rospy.loginfo('generatePath: from:',startLat,startLon,
         #   'to:',targetLat,targetLon)
-        rospy.wait_for_service('dubins_curves_latlong')
+        service_name = 'dubins_curves_latlong'
+        try:
+            rospy.wait_for_service(service_name, timeout=0.5)
+        except rospy.ROSException as e:
+            rospy.logerr("mission_manager: %s"%str(e))
+            # Return an empty list 
+            return []
+            
         dubins_service = rospy.ServiceProxy('dubins_curves_latlong',
                                             DubinsCurvesLatLong)
 
@@ -869,9 +876,9 @@ class Hover(MMState):
         rospy.loginfo_throttle(2.0, "mission_manager: hover action feedback: \n"
                       "\t range: %.2f, bearing: %.2f, speed: %.2f"%
                       (feedback.range, feedback.bearing, feedback.speed))
-    def callbackDone(self, result):
+    def callbackDone(self, state, result):
         rospy.loginfo("mission_manager: hover action dene: \n"
-                      "\t result: %s"%str(result))
+                      "\t state: %s ,result: %s"%(str(state),str(result)))
 
 class LineEnded(MMState):
     '''
@@ -968,21 +975,30 @@ class Goto(MMState):
         '''
         task = self.missionManager.getCurrentTask()
         if task is not None:
-            if self.missionManager.distanceTo(
-                    task['latitude'],
-                    task['longitude']) <= self.missionManager.waypointThreshold:
+            dist = self.missionManager.distanceTo(task['latitude'],
+                                                  task['longitude'])
+            if (dist <= self.missionManager.waypointThreshold):
+                rospy.loginfo("mission_manager.GOTO: Distance <%.1f> is within"
+                              " threshold <%.1f>.  Transition to NEXTASK"%
+                              (dist, self.missionManager.waypointThreshold))
                 self.missionManager.pending_command = 'next_task'
                 return 'done'
-            
             headingToPoint = self.missionManager.headingToPoint(
                 task['latitude'],task['longitude'])
+            rospy.loginfo("mission_manager.GOTO: Generating Dubin's path.")
             path = self.missionManager.generatePathFromVehicle(
                 task['latitude'],task['longitude'],headingToPoint)
-            ROS_INFO_STREAM("mission_manager.GOTO: Generated Dubin's path:" <<
-                            str(path))
+            if (len(path) < 1):
+                return 'done'
+            rospy.loginfo("mission_manager.GOTO: Generated Dubin's path: %s"%
+                          str(path))
             task['path'] = path
             task['default_speed'] = self.missionManager.default_speed
             return 'follow_path'
+        else:
+            rospy.logerr("mission_manager.GOTO: "
+                          "MissionManagerCore.getCurrentTask() returns None "
+                          "- so GOTO state has undefined return.")
         
 class FollowPath(MMState):
     '''
