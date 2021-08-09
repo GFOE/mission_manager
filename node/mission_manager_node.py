@@ -661,7 +661,7 @@ class MissionManagerCore(object):
                 else:
                     try:
                         i = self.tasks.index(self.current_task)
-                        rospy.loginfo('nextTask: current task index:',i)
+                        rospy.loginfo('nextTask: current task index: %d'%i)
                         if self.pending_command == 'next_task':
                             i += 1
                             if i >= len(self.tasks):
