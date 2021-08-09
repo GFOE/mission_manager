@@ -1048,34 +1048,42 @@ class FollowPath(MMState):
             self.task_complete = False
             # Sends goal to either path_follower or
             # path_planner action client.
+
+            '''
+            The planner attribute is a string which specifies which
+            path follwer action client to use.
+            Here we assign the generic 'follower_client' object 
+            based on that string.
+            '''
+            # Default is path_follower
+            follower_client = self.path_follower_client
             if self.missionManager.planner == 'path_follower':
                 self.path_planner_client.cancel_goal()
-                to = 2.0
-                if (not self.path_follower_client.wait_for_server(
-                        rospy.Duration(to))):
-                    rospy.logerr("mission_manager.FollowPath: "
-                                 "Connection to path_follower "
-                                 "action server timed out after %.2f s"%to)
-                    return 'cancelled'
-                self.path_follower_client.send_goal(
-                    goal,
-                    self.path_follower_done_callback,
-                    self.path_follower_active_callback,
-                    self.path_follower_feedback_callback)
+                follower_client = self.path_follower_client
             elif self.missionManager.planner == 'path_planner':
                 self.path_follower_client.cancel_goal()
-                to = 2.0
-                if (not self.path_planner_client.wait_for_server(
-                        rospy.Duration(to))):
-                    rospy.logerr("mission_manager.FollowPath: "
-                                 "Connection to path_planner "
-                                 "action server timed out after %.2f s"%to)
-                    return 'cancelled'
-                self.path_planner_client.send_goal(
-                    goal,
-                    self.path_follower_done_callback,
-                    self.path_follower_active_callback,
-                    self.path_follower_feedback_callback)
+                follower_client = self.path_planner_client
+            else:
+                rospy.logerr("mission_manager: Undefined behavior for "
+                             "MissionManagerCore.planner == <%s>.  "
+                             "Cancelling FollowPath!"
+                             %self.missionManager.planner)
+                return 'cancelled'
+        
+            # Wait for client server, with timeout
+            to = 2.0
+            if (not follower_client.wait_for_server(
+                    rospy.Duration(to))):
+                rospy.logerr("mission_manager.FollowPath: "
+                             "Connection to path_follower "
+                             "action server timed out after %.2f s"%to)
+                return 'cancelled'
+            # Send goal path that was planned by Goto State
+            follower_client.send_goal(
+                goal,
+                self.callbackFollowerDone,
+                self.callbackFollowerActive,
+                self.callbackFollowerFeedback)
         
         while True:
             ret = self.missionManager.iterate('FollowPath')
@@ -1090,21 +1098,21 @@ class FollowPath(MMState):
             if self.task_complete:
                 return 'done'
 
-    def path_follower_done_callback(self, status, result):
+    def callbackFollowerDone(self, status, result):
         '''
-        Callback for path_{follower,planner} action interface 
+        Callback for follower action client interface 
         '''
         self.task_complete = True
     
-    def path_follower_active_callback(self):
+    def callbackFollowerActive(self):
         '''
-        Callback for path_{follower,planner} action interface 
+        Callback for follower action client interface 
         '''
         pass
     
-    def path_follower_feedback_callback(self, msg):
+    def callbackFollowerFeedback(self, msg):
         '''
-        Callback for path_{follower,planner} action interface 
+        Callback for follower action client interface 
         '''
         pass
 
