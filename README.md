@@ -24,7 +24,7 @@ A "command" is sent as a ROS message String and includes a command and an option
 Tasks are sent via the Command string interface (and possibly other ways).
 The Task String containts "task_type task_args" deliminted by whitespace, i.e., `task_str = "task_type task_args"`.  The task_types and their task_args are described below.  
 
-Tasks are stored in a list (queue) as the `tasks` attribute of the 
+Tasks are stored in a list (queue) as the `tasks` attribute of the MissionManagerCore object.
 
 
 ## task_type = "mission_plan"
@@ -35,7 +35,7 @@ task_arg is complete mission in json format.  Not sure the syntax of a mission.
 
 task_arg = "latitude longitude", where both are in decimal degrees.
 
-## hover
+## task_type = "hover"
 
 task_arg = "latitude longitude", where both are in decimal degrees.
 
@@ -71,3 +71,14 @@ Length of the tasks list in the mission_manager object - as a string of course.
 The `pending_command` attribute of the MissionManagerCore object is a string.  Enumeration and explanation of the strings are aas follows:
 
 ## do_override
+
+## next_task
+
+## restart_mission
+
+## prev_task
+
+# State Classes
+
+## Pause
+

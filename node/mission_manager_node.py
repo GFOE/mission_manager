@@ -16,21 +16,8 @@ Publishes:
 Dynamic Reconfiguration:
 Uses reconfiguration server for parameters - see mission_manager/cfg 
 
-Commands:
-A "command" is sent as a String and includes a command and an optional argument, separated by whitespace. 
-command strings include the following:
-
-* replace_task:
-* append_task:
-* prepend_task:
-* clear_tasks:
-* next_task:
-* prev_task:
-* goto_task:
-* goto_line:
-* start_line:
-* restart_mission:
-* override:
+TODO: Create a Task class, as an alternative to an unconstrained dictionary, 
+to define the attributes and methods of an object. 
 
 '''
 
@@ -572,15 +559,24 @@ class MissionManagerCore(object):
 
     def iterate(self, current_state):
         '''
+        Method called by the SMACH state execution as the interface between
+        the state machines and the MissionManagerCore.
         
         TODO: Returning either a string or None is ill-defined and confusing.
-        
+
+        TODO: It appears that returning None is intended to indicate that the 
+        smach states should continue.  It would improve clarity if the function 
+        returned something more overt, e.g., 'continue'
+
         TODO: Create more consist return strings. E.g., if they are going to be
         phrased as commands, they should be {exit, pause, cancel}.
 
-        :param str current_state
-        :returns String to communicate to state class what to do next
-                 OR None
+
+        :param str current_state Arbitrary string - typically the name of the 
+                                 SMACH state object that called the function.
+        :returns String to communicate to SMACH state classes what to do next
+                 which can be {'exit', 'pause', 'cancelled'} 
+                                 or None
         '''
         if rospy.is_shutdown():
             rospy.loginfo("mission_manager: ROS is shutdown, so telling "
@@ -599,18 +595,25 @@ class MissionManagerCore(object):
         # TODO: Why not publish status if one of the above conditions are met?
         self.publishStatus(current_state)
         # TODO: Why this fixed sleep?  Need to improve and parameterize.
+        # TODO: This sleep is likely redundant with sleep calls in the
+        #       smach states.
         rospy.sleep(0.1)
         return None          
 
     def nextTask(self):
         '''
-        '''
-        rospy.loginfo('nextTask: pending_command:',str(self.pending_command))
+        Executed by the NextTask class execute method.
 
-        
+        :returns None
+        '''
+
+        rospy.loginfo('mission_manager.nextTask: pending_command: %s'%
+                      str(self.pending_command))
+
+        # do_override:
         if self.pending_command == 'do_override':
             if ( (self.current_task is not None) and
-                 (self.current_task['type'] == 'mission_plan'):
+                 (self.current_task['type'] == 'mission_plan') ):
                 self.current_task['current_path'] = None
             self.saved_task = self.current_task
             self.pending_command = None
@@ -691,10 +694,19 @@ class MissionManagerCore(object):
         
         self.pending_command = None
 
+    
     def getCurrentTask(self):
+        '''
+        Returns either the current_task or the override_task attribute
+
+        TODO: Surprising behavior that it doesn't always access 
+        the current_task attribute.  Get rid of the access method. 
+        Python doesn't have private attributes.
+
+        :returns Task dictionary 
+        '''
         if self.override_task is not None:
             return self.override_task
-            
         return self.current_task
 
     
@@ -734,20 +746,29 @@ class MissionManagerCore(object):
 class MMState(smach.State):
     '''
     Base state for Mission Manager states
+
+    TODO: The update rate / sleep period is fixed in the states. 
+    Add a base class method and attribute to parameterize the update rate.
     '''
     def __init__(self, mm, outcomes):
         smach.State.__init__(self, outcomes=outcomes)
         self.missionManager = mm
         
 class Pause(MMState):
-    """
+    '''
     This state is for all top level piloting_mode other than autonomous
-    """
+
+    TODO: Instead of a semi-infinite loop, have this state transition
+    back to itself if the mode is still not 'autonomous'
+
+    Stays in this state while piloting_mode is not 'autonomous'
+    and ros is not shutdown.
+    '''
     def __init__(self, mm):
         MMState.__init__(self, mm, outcomes=['resume','exit'])
         
     def execute(self, userdata):
-        while self.missionManager.getPilotingMode() != 'autonomous':
+        while self.missionManager.piloting_mode != 'autonomous':
             if rospy.is_shutdown():
                 return 'exit'
             self.missionManager.publishStatus('Pause')
@@ -757,24 +778,40 @@ class Pause(MMState):
 class Idle(MMState):
     """
     In autonomous mode, but with no pending tasks.
+
+    TODO: The 'exit' outcome is specified, but there is no associated 
+    transition.  Should remove the outcome or define the transition.
+    
     """
     def __init__(self, mm):
         MMState.__init__(self, mm, outcomes=['exit','do-task','pause'])
         
     def execute(self, userdata):
+        '''
+        Loop repeates infinitely
+          if ( (interate() returns None) and
+               (missionManager.tasks queue is empty) )
+
+        TODO: Why is userdata included, but never used?
+
+        TODO: Replace semi-infinite loop with state transition back to same
+              state.
+        '''
         while True:
             ret = self.missionManager.iterate('Idle')
             if ret == 'cancelled':
                 return 'do-task'
+            # TODO: Increase readabilty with
+            # elif ret in ['pause', 'cancelled']:
             if ret is not None:
                 return ret
             if len(self.missionManager.tasks) != 0:
                 return 'do-task'
 
-
 class NextTask(MMState):
     def __init__(self, mm):
-        MMState.__init__(self, mm, outcomes=['idle','mission_plan','goto','hover'])
+        MMState.__init__(self, mm, outcomes=['idle','mission_plan',
+                                             'goto','hover'])
         
     def execute(self, userdata):
         self.missionManager.nextTask()
@@ -785,10 +822,15 @@ class NextTask(MMState):
         return 'idle'
 
 class Hover(MMState):
+    '''
+    SMACH state object 
+    Interfaces with the hover action - see hover repository for action spec.
+    
+    '''
     def __init__(self, mm):
         MMState.__init__(self, mm, outcomes=['cancelled','exit','pause'])
-        self.hover_client = actionlib.SimpleActionClient('hover_action', hover.msg.hoverAction)
-        
+        self.hover_client = actionlib.SimpleActionClient('hover_action',
+                                                         hover.msg.hoverAction)
     def execute(self, userdata):
         task = self.missionManager.getCurrentTask()
         if task is not None:
@@ -797,7 +839,12 @@ class Hover(MMState):
             goal.target.longitude = task['longitude']
             self.hover_client.wait_for_server()
             self.hover_client.send_goal(goal)
+        # TODO: Would be more clear...
+        # ret = None
+        # while (ret is None):
         while True:
+            # TODO: Update the status rospy.loginfo
+            #  through the action feedback interface.
             ret = self.missionManager.iterate('Hover')
             if ret is not None:
                 self.hover_client.cancel_goal()
@@ -862,27 +909,61 @@ class MissionPlan(MMState):
             task['do_transit'] = True
         
 class Goto(MMState):
+    '''
+    SMACH state object
+    
+
+    '''
     def __init__(self, mm):
         MMState.__init__(self, mm, outcomes=['done','follow_path'])
         
     def execute(self, userdata):
+        '''
+        If we are close to waypoint - returns 'done'
+        Otherwise, plans the Dubin's path and returns 'follow_path'
+
+        TODO: The MissionManagerCore object is too intertwined with this 
+        function.  The methods being used should be 
+        independent of MissionManagerCore.
+
+        TODO: The path is stuffed back into the MissionManagerCore.task
+        attribute.  Would it be cleaner to use userdata to pass the path
+        to the follower?
+        '''
         task = self.missionManager.getCurrentTask()
         if task is not None:
-            if self.missionManager.distanceTo(task['latitude'],task['longitude']) <= self.missionManager.waypointThreshold:
+            if self.missionManager.distanceTo(
+                    task['latitude'],
+                    task['longitude']) <= self.missionManager.waypointThreshold:
                 self.missionManager.pending_command = 'next_task'
                 return 'done'
             
-            headingToPoint = self.missionManager.headingToPoint(task['latitude'],task['longitude'])
-            path = self.missionManager.generatePathFromVehicle(task['latitude'],task['longitude'],headingToPoint)
+            headingToPoint = self.missionManager.headingToPoint(
+                task['latitude'],task['longitude'])
+            path = self.missionManager.generatePathFromVehicle(
+                task['latitude'],task['longitude'],headingToPoint)
             task['path'] = path
             task['default_speed'] = self.missionManager.default_speed
             return 'follow_path'
         
 class FollowPath(MMState):
+    '''
+    SMACH state object.
+
+    Uses either path_follower action OR path_planner action, 
+    depending on the string attribute MissionManagerCore.planner.
+
+
+    '''
     def __init__(self, mm):
+        '''
+        Initiates path_follower and path_planner action clients.
+        '''
         MMState.__init__(self, mm, outcomes=['done','cancelled','exit','pause'])
-        self.path_follower_client = actionlib.SimpleActionClient('path_follower_action', path_follower.msg.path_followerAction)
-        self.path_planner_client = actionlib.SimpleActionClient('path_planner_action', path_planner.msg.path_plannerAction)
+        self.path_follower_client = actionlib.SimpleActionClient(
+            'path_follower_action', path_follower.msg.path_followerAction)
+        self.path_planner_client = actionlib.SimpleActionClient(
+            'path_planner_action', path_planner.msg.path_plannerAction)
         self.task_complete = False
         
     def execute(self, userdata):
@@ -907,23 +988,28 @@ class FollowPath(MMState):
                 goal.path.poses.append(gpose)
             goal.speed = task['default_speed']
             self.task_complete = False
+            # Sends goal to either path_follower or
+            # path_planner action client.
             if self.missionManager.planner == 'path_follower':
                 self.path_planner_client.cancel_goal()
                 self.path_follower_client.wait_for_server()
-                self.path_follower_client.send_goal(goal,
-                                                    self.path_follower_done_callback,
-                                                    self.path_follower_active_callback,
-                                                    self.path_follower_feedback_callback)
+                self.path_follower_client.send_goal(
+                    goal,
+                    self.path_follower_done_callback,
+                    self.path_follower_active_callback,
+                    self.path_follower_feedback_callback)
             elif self.missionManager.planner == 'path_planner':
                 self.path_follower_client.cancel_goal()
                 self.path_planner_client.wait_for_server()
-                self.path_planner_client.send_goal(goal,
-                                                   self.path_follower_done_callback,
-                                                   self.path_follower_active_callback,
-                                                   self.path_follower_feedback_callback)
-
+                self.path_planner_client.send_goal(
+                    goal,
+                    self.path_follower_done_callback,
+                    self.path_follower_active_callback,
+                    self.path_follower_feedback_callback)
+        
         while True:
             ret = self.missionManager.iterate('FollowPath')
+            # TODO: Get and report feedback from action client.
             if ret is not None:
                 if ret == 'cancelled':
                     if self.missionManager.planner == 'path_follower':
@@ -935,12 +1021,21 @@ class FollowPath(MMState):
                 return 'done'
 
     def path_follower_done_callback(self, status, result):
+        '''
+        Callback for path_{follower,planner} action interface 
+        '''
         self.task_complete = True
     
     def path_follower_active_callback(self):
+        '''
+        Callback for path_{follower,planner} action interface 
+        '''
         pass
     
     def path_follower_feedback_callback(self, msg):
+        '''
+        Callback for path_{follower,planner} action interface 
+        '''
         pass
 
 class SurveyArea(MMState):
