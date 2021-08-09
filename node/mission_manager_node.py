@@ -11,7 +11,7 @@ Subscribes:
 
 Publishes:
 
-* "project11/status/mission_manager" with Heartbeat 
+* "project11/status/mission_manager" with Heartbeat - includes a number of key/value pairs to describe the current status of the state machine and MissionManagerCore object.
 
 Dynamic Reconfiguration:
 Uses reconfiguration server for parameters - see mission_manager/cfg 
@@ -527,7 +527,9 @@ class MissionManagerCore(object):
 
     def segmentHeading(self, start_lat, start_lon, dest_lat, dest_lon):
         '''
-        
+        Uses python11.geodesic library to determine bearing (degrees, NED)
+        from start lat/lon to destination lat/lon.
+
         TODO: This should not be a method of the object.  Should be a general
               purpose function, probably in project11 module.  
               Not specific to this program.
@@ -541,7 +543,8 @@ class MissionManagerCore(object):
         dest_lat_rad = math.radians(dest_lat)
         dest_lon_rad = math.radians(dest_lon)
         
-        path_azimuth, path_distance = project11.geodesic.inverse(start_lon_rad, start_lat_rad, dest_lon_rad, dest_lat_rad)
+        path_azimuth, path_distance = project11.geodesic.inverse(
+            start_lon_rad, start_lat_rad, dest_lon_rad, dest_lat_rad)
         return math.degrees(path_azimuth)
 
     def headingToYaw(self, heading):
@@ -851,10 +854,23 @@ class Hover(MMState):
                 return ret
 
 class LineEnded(MMState):
+    '''
+    SMACH state object
+
+    TODO: This state doesn't appear to have much purpose in the 
+          GOTO use case, were we transition here from GOTO and then 
+          straight to NEXTTASK
+    '''
     def __init__(self,mm):
         MMState.__init__(self, mm, outcomes=['mission_plan','next_item'])
 
     def execute(self, userdata):
+        '''
+        For the GOTO use-case, this just sets pending_command and 
+        transitions to NEXTTASK.
+
+        TODO: Describe the MISSIONPLAN use-case
+        '''
         task = self.missionManager.getCurrentTask()
         if task is not None and task['type'] == 'mission_plan':
             if task['transit_path'] is not None:
@@ -1042,7 +1058,8 @@ class SurveyArea(MMState):
     def __init__(self, mm):
         MMState.__init__(self, mm, outcomes=['done','cancelled',
                                              'exit','pause'])
-        self.survey_area_client = actionlib.SimpleActionClient('survey_area_action', manda_coverage.msg.manda_coverageAction)
+        self.survey_area_client = actionlib.SimpleActionClient(
+            'survey_area_action', manda_coverage.msg.manda_coverageAction)
         self.task_complete = False
 
     def execute(self, userdata):
@@ -1058,10 +1075,11 @@ class SurveyArea(MMState):
             goal.speed = task['default_speed']
             self.task_complete = False
             self.survey_area_client.wait_for_server()
-            self.survey_area_client.send_goal(goal,
-                                              self.survey_area_done_callback,
-                                              self.survey_area_active_callback,
-                                              self.survey_area_feedback_callback)
+            self.survey_area_client.send_goal(
+                goal,
+                self.survey_area_done_callback,
+                self.survey_area_active_callback,
+                self.survey_area_feedback_callback)
 
         while True:
             ret = self.missionManager.iterate('SurveyArea')
