@@ -92,8 +92,11 @@ class MissionManagerCore(object):
                          self.pilotingModeCallback, queue_size = 1)
         rospy.Subscriber('odom', Odometry,
                          self.odometryCallback, queue_size = 1)
-        rospy.Subscriber('project11/mission_manager/command', String,
-                         self.commandCallback, queue_size = 1)
+        command_topic = 'project11/mission_manager/command' 
+        rospy.Subscriber(command_topic, String,
+                         self.commandCallback,
+                         callback_args = command_topic,
+                         queue_size = 1)
         rospy.Subscriber('project11/heartbeat', Heartbeat,
                          self.heartbeatCallback, queue_size = 1)
 
@@ -152,15 +155,18 @@ class MissionManagerCore(object):
         '''
         return self.piloting_mode
     
-    def commandCallback(self, msg):
+    def commandCallback(self, msg, args):
         '''
         Receives command String
 
         :param String msg: Formated string, delimited by whitespace, describing
                            task_type and task parameters.
+        :param String args: Use callback_args functionality of subscriber to 
+                            pass topic name.
         '''
 
-        rospy.loginfo("mission_manager: Received command: %s"%str(msg))
+        rospy.loginfo("mission_manager: Received command string <%s>"
+                      "on topic <%s>"%(str(msg.data), args))
         
         parts = msg.data.split(None,1)
         cmd = parts[0]
@@ -840,8 +846,13 @@ class Hover(MMState):
             goal = hover.msg.hoverGoal()
             goal.target.latitude = task['latitude']
             goal.target.longitude = task['longitude']
+            rospy.loginfo("mission_manager.Hover: Sending goal to hover "
+                          "action server: %s"%str(goal))
             self.hover_client.wait_for_server()
-            self.hover_client.send_goal(goal)
+            self.hover_client.send_goal(goal,
+                                        active_cb = self.callbackActive,
+                                        feedback_cb = self.callbackFeedback,
+                                        done_cb = self.callbackDone)
         # TODO: Would be more clear...
         # ret = None
         # while (ret is None):
@@ -852,6 +863,15 @@ class Hover(MMState):
             if ret is not None:
                 self.hover_client.cancel_goal()
                 return ret
+    def callbackActive(self):
+        rospy.loginfo("mission_manager: hover action is active.")
+    def callbackFeedback(self, feedback):
+        rospy.loginfo_throttle(2.0, "mission_manager: hover action feedback: \n"
+                      "\t range: %.2f, bearing: %.2f, speed: %.2f"%
+                      (feedback.range, feedback.bearing, feedback.speed))
+    def callbackDone(self, result):
+        rospy.loginfo("mission_manager: hover action dene: \n"
+                      "\t result: %s"%str(result))
 
 class LineEnded(MMState):
     '''
@@ -958,6 +978,8 @@ class Goto(MMState):
                 task['latitude'],task['longitude'])
             path = self.missionManager.generatePathFromVehicle(
                 task['latitude'],task['longitude'],headingToPoint)
+            ROS_INFO_STREAM("mission_manager.GOTO: Generated Dubin's path:" <<
+                            str(path))
             task['path'] = path
             task['default_speed'] = self.missionManager.default_speed
             return 'follow_path'
