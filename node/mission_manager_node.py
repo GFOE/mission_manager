@@ -855,7 +855,11 @@ class Hover(MMState):
             goal.target.longitude = task['longitude']
             rospy.loginfo("mission_manager.Hover: Sending goal to hover "
                           "action server: %s"%str(goal))
-            self.hover_client.wait_for_server()
+            to = 2.0
+            if (not self.hover_client.wait_for_server(rospy.Duration(to))):
+                rospy.logerr("mission_manager.Hover: Connection to hover "
+                             "action server timed out after %.2f s"%to)
+                return 'cancelled'
             self.hover_client.send_goal(goal,
                                         active_cb = self.callbackActive,
                                         feedback_cb = self.callbackFeedback,
@@ -1046,7 +1050,13 @@ class FollowPath(MMState):
             # path_planner action client.
             if self.missionManager.planner == 'path_follower':
                 self.path_planner_client.cancel_goal()
-                self.path_follower_client.wait_for_server()
+                to = 2.0
+                if (not self.path_follower_client.wait_for_server(
+                        rospy.Duration(to))):
+                    rospy.logerr("mission_manager.FollowPath: "
+                                 "Connection to path_follower "
+                                 "action server timed out after %.2f s"%to)
+                    return 'cancelled'
                 self.path_follower_client.send_goal(
                     goal,
                     self.path_follower_done_callback,
@@ -1054,7 +1064,13 @@ class FollowPath(MMState):
                     self.path_follower_feedback_callback)
             elif self.missionManager.planner == 'path_planner':
                 self.path_follower_client.cancel_goal()
-                self.path_planner_client.wait_for_server()
+                to = 2.0
+                if (not self.path_planner_client.wait_for_server(
+                        rospy.Duration(to))):
+                    rospy.logerr("mission_manager.FollowPath: "
+                                 "Connection to path_planner "
+                                 "action server timed out after %.2f s"%to)
+                    return 'cancelled'
                 self.path_planner_client.send_goal(
                     goal,
                     self.path_follower_done_callback,
@@ -1112,7 +1128,13 @@ class SurveyArea(MMState):
                 goal.area.append(gp)
             goal.speed = task['default_speed']
             self.task_complete = False
-            self.survey_area_client.wait_for_server()
+            to = 2.0
+            if (not self.survey_area_client.wait_for_server(
+                    rospy.Duration(to))):
+                rospy.logerr("mission_manager.SurveyArea: Connection to "
+                             "survey_area "
+                             "action server timed out after %.2f s"%to)
+                return 'cancelled'
             self.survey_area_client.send_goal(
                 goal,
                 self.survey_area_done_callback,
