@@ -527,7 +527,7 @@ class MissionManagerCore(object):
         
         # Return the service output
         rospy.loginfo("mission_manager: Generated the following Dubins path: "
-                      "%s"%str(dubins_path)
+                      "%s"%str(dubins_path))
         return dubins_path.path
 
     def segmentHeading(self, start_lat, start_lon, dest_lat, dest_lon):

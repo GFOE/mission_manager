@@ -1,0 +1,25 @@
+actions: []
+authors: ''
+brief: ''
+bugtracker: ''
+depends:
+- message_runtime
+- dynamic_reconfigure
+- std_msgs
+- catkin
+- geometry_msgs
+- path_planner
+- nav_msgs
+- python-catkin-pkg
+- rospy
+- smach_ros
+- message_generation
+- path_follower
+description: The mission_manager package
+license: BSD
+maintainers: Roland Arsenault <roland@ccom.unh.edu>
+msgs: []
+package_type: package
+repo_url: ''
+srvs: []
+url: ''
