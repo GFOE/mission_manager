@@ -308,7 +308,7 @@ class MissionManagerCore(object):
         return None
 
     def parseMission(self, plan, default_speed):
-       '''
+        '''
         Create a task dict from a json description.
         Called when a "mission_plan" command is received.
 

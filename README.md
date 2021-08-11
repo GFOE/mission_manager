@@ -31,6 +31,7 @@ The interface between MissionManagerCore and smach.StateMachine consists of...
 The heirarchical state machine is static, i.e., the same state machine is used for all missions and tasking.  The MissionManagerCore iteracts with the state machine to cause transitions based on the MissionManagerCore state (vehicle Odometry, task commands, etc.)
 
 
+![alt text](https://github.com/GFOE/mission_manager/blob/noetic/plantuml/mission_manager.png?raw=true)
 
 
 ## Interfaces
@@ -38,22 +39,29 @@ The heirarchical state machine is static, i.e., the same state machine is used f
 Publications: 
  * /MissionManager/parameter_descriptions [dynamic_reconfigure/ConfigDescription]
  * /MissionManager/parameter_updates [dynamic_reconfigure/Config]
+     * Uses reconfiguration server for parameters - see mission_manager/cfg 
  * /hover_action/cancel [actionlib_msgs/GoalID]
  * /hover_action/goal [hover/hoverActionGoal]
+      * Hover.action.goal - geographic_msgs/GeoPoint target
  * /mission_manager/smach/container_status [smach_msgs/SmachContainerStatus]
+      * Part of SMACH
  * /mission_manager/smach/container_structure [smach_msgs/SmachContainerStructure]
+     * Part of SMACH			      
  * /path_follower_action/cancel [actionlib_msgs/GoalID]
  * /path_follower_action/goal [path_follower/path_followerActionGoal]
+     * path_follower.action.goal : geographic_msgs/GeoPath path
  * /path_planner_action/cancel [actionlib_msgs/GoalID]
  * /path_planner_action/goal [path_planner/path_plannerActionGoal]
+     * path_plannier.action.goal : geographic_msgs/GeoPath path
  * /project11/status/mission_manager [marine_msgs/Heartbeat]
  * /rosout [rosgraph_msgs/Log]
  * /survey_area_action/cancel [actionlib_msgs/GoalID]
  * /survey_area_action/goal [manda_coverage/manda_coverageActionGoal]
+ 
 
 Subscriptions: 
- * /hover_action/feedback [unknown type]
- * /hover_action/result [unknown type]
+ * /hover_action/feedback [hover/hoverActionFeedback]
+ * /hover_action/result [hover/hoverActionResult]
  * /hover_action/status [unknown type]
  * /mission_manager/smach/container_init [unknown type]
  * /odom [unknown type]
