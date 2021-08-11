@@ -3,18 +3,18 @@ authors: ''
 brief: ''
 bugtracker: ''
 depends:
-- message_runtime
-- dynamic_reconfigure
-- std_msgs
-- catkin
-- geometry_msgs
-- path_planner
+- smach_ros
 - nav_msgs
+- dynamic_reconfigure
+- path_follower
+- catkin
 - python-catkin-pkg
 - rospy
-- smach_ros
 - message_generation
-- path_follower
+- geometry_msgs
+- path_planner
+- std_msgs
+- message_runtime
 description: The mission_manager package
 license: BSD
 maintainers: Roland Arsenault <roland@ccom.unh.edu>

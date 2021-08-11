@@ -3,21 +3,17 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to mission_manager's documentation!
+mission_manager
 ===========================================
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   
+   mission_manager_node
 
-.. mdinclude:: ../README.md
+README.rst
+===========================================
+.. include:: ../README.md
 
-.. automodule:: mission_manager_node
-   :members:
 
-Indices and tables
-==================
 
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
