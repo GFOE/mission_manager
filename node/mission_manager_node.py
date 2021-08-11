@@ -11,7 +11,7 @@ Subscribes:
 
 Publishes:
 
-* "project11/status/mission_manager" with Heartbeat - includes a number of key/value pairs to describe the current status of the state machine and MissionManagerCore object.
+* "project11/status/mission_manager" with Heartbeat - includes a number of key/value pairs to describe the current status of the `state machine and MissionManagerCore object.
 
 Dynamic Reconfiguration:
 Uses reconfiguration server for parameters - see mission_manager/cfg 
@@ -916,20 +916,23 @@ class LineEnded(MMState):
         
 class MissionPlan(MMState):
     def __init__(self, mm):
-        MMState.__init__(self, mm, outcomes=['follow_path','survey_area','done'])
+        MMState.__init__(self, mm, outcomes=['follow_path',
+                                             'survey_area','done'])
         
     def execute(self, userdata):
         task = self.missionManager.current_task
         if task is not None:
-            if task['current_nav_objective_index'] is None:
+            if (task['current_nav_objective_index'] is None):
                 task['current_nav_objective_index'] = 0
-            if task['current_nav_objective_index'] >= len(task['nav_objectives']):
+            if (task['current_nav_objective_index'] >=
+                len(task['nav_objectives'])):
                 task['current_nav_objective_index'] = None
                 self.missionManager.pending_command = 'next_task'
                 return 'done'
-            if task['nav_objectives'][task['current_nav_objective_index']]['type'] == 'SurveyArea':
+            if (task['nav_objectives'][task['current_nav_objective_index']]['type'] == 'SurveyArea'):
                 return 'survey_area'
-            if not 'current_path' in task or task['current_path'] is None:
+            if ((not 'current_path' in task) or
+                (task['current_path'] is None)):
                 self.generatePaths(task)
             return 'follow_path'
         return 'done'
