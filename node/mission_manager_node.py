@@ -261,11 +261,11 @@ class MissionManagerCore(object):
                 rospy.logerr("mission_manager: No defined task of type <%s> "
                              "from task string <%s>"%(task_type, args))
                 
-            if task is not None: 
+            if ((task is not None) or (len(task_list) > 0)): 
                 if prepend:
-                    self.tasks.insert(0,task)
+                    self.tasks = task_list + self.task
                 else:
-                    self.tasks.append(task)
+                    self.tasks += task_list
             else:
                 rospy.logerr("mission_manager: The task string <%s> was "
                              "not successfully parsed. No task added!"%
