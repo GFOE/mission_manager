@@ -12,6 +12,7 @@ from geographic_msgs.msg import GeoPoseStamped
 from geographic_msgs.msg import GeoPose
 from geographic_msgs.msg import GeoPoint
 from nav_msgs.msg import Odometry
+from geographic_visualization_msgs.msg import GeoVizItem, GeoVizPointList
 
 from dynamic_reconfigure.server import Server
 from mission_manager.cfg import mission_managerConfig
@@ -45,16 +46,20 @@ class MissionManagerCore(object):
         self.override_task = None # a task that may be added, such as hover, to temporarily interupt current tast.
         self.saved_task = None # a task that was current when an override task was added
         self.pending_command = None
-        
+
+        self.lineup_distance = 25
+
         self.done_behavior = 'hover'
         
         rospy.Subscriber('project11/piloting_mode', String, self.pilotingModeCallback, queue_size = 1)
-        rospy.Subscriber('odom', Odometry, self.odometryCallback, queue_size = 1)
+        rospy.Subscriber('project11/odom', Odometry, self.odometryCallback, queue_size = 1)
         rospy.Subscriber('project11/mission_manager/command', String, self.commandCallback, queue_size = 1)
         rospy.Subscriber('project11/heartbeat', Heartbeat, self.heartbeatCallback, queue_size = 1)
 
         
         self.status_publisher = rospy.Publisher('project11/status/mission_manager', Heartbeat, queue_size = 10)
+        self.endofline_publisher = rospy.Publisher('project11/endofline', String, queue_size = 1)
+        self.display_publisher = rospy.Publisher('project11/display', GeoVizItem, queue_size = 1)
 
         self.config_server = Server(mission_managerConfig, self.reconfigure_callback)
         
@@ -138,28 +143,30 @@ class MissionManagerCore(object):
     def clearTasks(self):
         self.tasks = []
         self.current_task = None
+        self.saved_task = None
 
     def addTask(self, args, prepend=False):
         parts = args.split(None,1)
         print(parts)
         if len(parts) == 2:
             task_type = parts[0]
-            task = None
+            task_list = []
             if task_type == 'mission_plan':
-                task = self.parseMission(parts[1])
+                task_list = self.parseMission(json.loads(parts[1]), self.default_speed)
             if task_type == 'goto':
                 task = self.parseLatLong(args)
                 if task is not None:
                     task['type'] = 'goto'
+                    task_list.append(task)
             if task_type == 'hover':
                 task = self.parseLatLong(args)
                 if task is not None:
                     task['type'] = 'hover'
-            if task is not None: 
-                if prepend:
-                    self.tasks.insert(0,task)
-                else:
-                    self.tasks.append(task)
+                    task_list.append(task)
+            if prepend:
+                self.tasks = task_list + self.tasks
+            else:
+                self.tasks += task_list
         print('tasks')
         print(self.tasks)
 
@@ -177,31 +184,44 @@ class MissionManagerCore(object):
             except ValueError:
                 return None
         
-    def parseMission(self, mp):
-        ret = {'type':'mission_plan',
-               'nav_objectives':[],
-               'default_speed':self.default_speed,
-               'do_transit':True
-               }
-        
-        plan = json.loads(mp)
+    def parseMission(self, plan, default_speed):
+        ret = []
+        speed = default_speed
         
         for item in plan:
             print(item)
             if item['type'] == 'Platform':
-                ret['default_speed'] = item['speed']*0.514444  # knots to m/s
-            if item['type'] == 'SurveyPattern':
-                for c in item['children']:
-                    ret['nav_objectives'].append(c)
-                ret['label'] = item['label']
-            if item['type'] == 'TrackLine':
-                ret['nav_objectives'].append(item)
-                ret['label'] = item['label']
-            if item['type'] == 'SurveyArea':
-                ret['nav_objectives'].append(item)
-                ret['label'] = item['label']
-        
-        ret['current_nav_objective_index'] = 0
+                speed = item['speed']*0.514444  # knots to m/s
+            if item['type'] in ('SurveyPattern', 'TrackLine', 'SurveyArea'):
+                current_item = {'type':'mission_plan',
+                    'nav_objectives':[],
+                    'default_speed':speed,
+                    'do_transit':True,
+                    'current_nav_objective_index':0
+                    }
+                if item['type'] == 'SurveyPattern':
+                    for c in item['children']:
+                        current_item['nav_objectives'].append(c)
+                    current_item['label'] = item['label']
+                if item['type'] == 'TrackLine':
+                    current_item['nav_objectives'].append(item)
+                    current_item['label'] = item['label']
+                if item['type'] == 'SurveyArea':
+                    for c in item['children']:
+                        if c['type'] != 'Waypoint':
+                            current_item = None
+                            break
+                    if current_item is None:
+                        ret += self.parseMission(item['children'], speed)
+                    else:
+                        current_item['nav_objectives'].append(item)
+                        current_item['label'] = item['label']
+                if current_item is not None:
+                    ret.append(current_item)
+            if item['type'] == 'Group':
+                group_items = self.parseMission(item['children'], speed)
+                ret += group_items
+
         return ret
 
     def position(self):
@@ -222,12 +242,20 @@ class MissionManagerCore(object):
       
     def distanceTo(self, lat, lon):
       p_rad = self.position()
+      if p_rad is None:
+          return None
       current_lat_rad = p_rad[0]
       current_lon_rad = p_rad[1]
       target_lat_rad = math.radians(lat)
       target_lon_rad = math.radians(lon)
       azimuth, distance = project11.geodesic.inverse(current_lon_rad, current_lat_rad, target_lon_rad, target_lat_rad)
       return distance
+
+    def waypointReached(self, lat, lon):
+      d = self.distanceTo(lat, lon)
+      if d is None:
+        return False
+      return d < self.waypointThreshold
 
     def generatePathFromVehicle(self, targetLat, targetLon, targetHeading):
       p = self.position()
@@ -391,14 +419,73 @@ class MissionManagerCore(object):
         hb = Heartbeat()
         hb.header.stamp = rospy.Time.now()
 
+        gvi = GeoVizItem()
+        gvi.id = 'mission_manager'
+        
         hb.values.append(KeyValue('state',state))
         hb.values.append(KeyValue('tasks_count',str(len(self.tasks))))
+
+        lastPosition = None
+        lastHeading = None
+        if self.current_task is None:
+            p = self.position()
+            if p is not None:
+                lastPosition = {'latitude': math.degrees(p[0]), 'longitude': math.degrees(p[1])}
+            lastHeading = self.heading()
+
         for t in self.tasks:
             tstring = t['type']
             if t['type'] == 'mission_plan' and 'label' in t:
                 tstring += ' ('+t['label']+')'
             hb.values.append(KeyValue('-task',tstring))
 
+            if t['type'] == 'mission_plan':
+                for track_num in range(len(t['nav_objectives'])):
+                    nav_o = t['nav_objectives'][track_num]
+                    nextHeading = None
+                    if len(nav_o['waypoints']) >= 2:
+                        wp1 = nav_o['waypoints'][0]
+                        wp2 = nav_o['waypoints'][1]
+                        nextHeading = self.segmentHeading(wp1['latitude'], wp1['longitude'], wp2['latitude'], wp2['longitude'])
+                    elif len(nav_o['waypoints']) == 1 and lastPosition is not None:
+                        wp1 = nav_o['waypoints'][0]
+                        nextHeading = self.segmentHeading(lastPosition['latitude'], lastPosition['longitude'], wp1['latitude'], wp1['longitude'])
+                    if nextHeading is not None and lastHeading is not None:
+                        gvpl = GeoVizPointList() # transit line
+                        gvpl.color.a = 0.5
+                        gvpl.color.r = 0.4
+                        gvpl.color.g = 0.4
+                        gvpl.color.b = 0.4
+                        gvpl.size = 2
+                        pre_start = project11.geodesic.direct(math.radians(wp1['longitude']), math.radians(wp1['latitude']), math.radians(nextHeading+180), self.lineup_distance)
+                        for p in self.generatePath(lastPosition['latitude'], lastPosition['longitude'], lastHeading, math.degrees(pre_start[1]), math.degrees(pre_start[0]), nextHeading):
+                            gvpl.points.append(p.position)
+                        gp = GeoPoint()
+                        gp.latitude = wp1['latitude']
+                        gp.longitude = wp1['longitude']
+                        gvpl.points.append(gp)
+                        gvi.lines.append(gvpl)
+                    if len(nav_o['waypoints']):
+                        gvpl = GeoVizPointList() # track line
+                        gvpl.color.a = 0.75
+                        gvpl.color.r = 0.65
+                        gvpl.color.g = 0.4
+                        gvpl.color.b = 0.75
+                        gvpl.size = 3
+                        for wp in nav_o['waypoints']:
+                            gp = GeoPoint()
+                            gp.latitude = wp['latitude']
+                            gp.longitude = wp['longitude']
+                            gvpl.points.append(gp)
+                        gvi.lines.append(gvpl)
+                        lastPosition = nav_o['waypoints'][-1]
+                        if len(nav_o['waypoints']) >= 2:
+                            wp1 = nav_o['waypoints'][-2]
+                            wp2 = nav_o['waypoints'][-1]
+                            lastHeading = self.segmentHeading(wp1['latitude'], wp1['longitude'], wp2['latitude'], wp2['longitude'])
+
+        self.display_publisher.publish(gvi)                
+                    
         if self.current_task is None:
             hb.values.append(KeyValue('current_task','None'))
         else:
@@ -464,12 +551,29 @@ class NextTask(MMState):
 
 class Hover(MMState):
     def __init__(self, mm):
-        MMState.__init__(self, mm, outcomes=['cancelled','exit','pause'])
+        MMState.__init__(self, mm, outcomes=['cancelled', 'exit', 'pause', 'follow_path'])
         self.hover_client = actionlib.SimpleActionClient('hover_action', hover.msg.hoverAction)
         
     def execute(self, userdata):
         task = self.missionManager.getCurrentTask()
         if task is not None:
+            if not self.missionManager.waypointReached(task['latitude'],task['longitude']):
+                path = []
+                p = self.missionManager.position()
+                if p is None:
+                  return 'cancelled'
+                gp = GeoPose()
+                gp.position.latitude = math.degrees(p[0])
+                gp.position.longitude = math.degrees(p[1])
+                path.append(gp)
+                g = GeoPose()
+                g.position.latitude = task['latitude']
+                g.position.longitude = task['longitude']
+                path.append(g)
+                task['path'] = path
+                task['path_type'] = 'transit'
+                task['default_speed'] = self.missionManager.default_speed
+                return 'follow_path'
             goal = hover.msg.hoverGoal()
             goal.target.latitude = task['latitude']
             goal.target.longitude = task['longitude']
@@ -490,9 +594,11 @@ class LineEnded(MMState):
         if task is not None and task['type'] == 'mission_plan':
             if task['transit_path'] is not None:
                 task['transit_path'] = None
+                self.missionManager.endofline_publisher.publish("transit")
             else:
                 task['current_path'] = None
                 task['current_nav_objective_index'] += 1
+                self.missionManager.endofline_publisher.publish("track")
             return 'mission_plan'
         self.missionManager.pending_command = 'next_task'
         return 'next_item'
@@ -523,7 +629,7 @@ class MissionPlan(MMState):
         print(task['nav_objectives'])
         for p in task['nav_objectives'][task['current_nav_objective_index']]['waypoints']:
             #path.append((p['position']['latitude'],p['position']['longitude']))
-            gp = GeoPose();
+            gp = GeoPose()
             gp.position.latitude = p['latitude']
             gp.position.longitude = p['longitude']
             path.append(gp)
@@ -535,7 +641,11 @@ class MissionPlan(MMState):
             next_point = task['current_path'][1]
             if task['do_transit'] and self.missionManager.distanceTo(start_point.position.latitude,start_point.position.longitude) > self.missionManager.waypointThreshold and self.missionManager.planner == 'path_follower':
                 #transit
-                transit_path = self.missionManager.generatePathFromVehicle(start_point.position.latitude,start_point.position.longitude, self.missionManager.segmentHeading(start_point.position.latitude,start_point.position.longitude,next_point.position.latitude,next_point.position.longitude))
+                segment_heading = self.missionManager.segmentHeading(start_point.position.latitude,start_point.position.longitude,next_point.position.latitude,next_point.position.longitude)
+                pre_start = project11.geodesic.direct(math.radians(start_point.position.longitude), math.radians(start_point.position.latitude), math.radians(segment_heading+180), self.missionManager.lineup_distance)
+                #print ('heading',segment_heading, 'start:', start_point.position, 'pre start:',  math.degrees(pre_start[1]), math.degrees(pre_start[0]))
+                transit_path = self.missionManager.generatePathFromVehicle(math.degrees(pre_start[1]), math.degrees(pre_start[0]), segment_heading)
+                transit_path.append(start_point)
                 task['transit_path'] = transit_path
             task['do_transit'] = True
         
@@ -553,12 +663,13 @@ class Goto(MMState):
             headingToPoint = self.missionManager.headingToPoint(task['latitude'],task['longitude'])
             path = self.missionManager.generatePathFromVehicle(task['latitude'],task['longitude'],headingToPoint)
             task['path'] = path
+            task['path_type'] = 'transit'
             task['default_speed'] = self.missionManager.default_speed
             return 'follow_path'
         
 class FollowPath(MMState):
     def __init__(self, mm):
-        MMState.__init__(self, mm, outcomes=['done','cancelled','exit','pause'])
+        MMState.__init__(self, mm, outcomes=['done','cancelled','exit','pause', 'hover'])
         self.path_follower_client = actionlib.SimpleActionClient('path_follower_action', path_follower.msg.path_followerAction)
         self.path_planner_client = actionlib.SimpleActionClient('path_planner_action', path_planner.msg.path_plannerAction)
         self.task_complete = False
@@ -571,7 +682,7 @@ class FollowPath(MMState):
             elif self.missionManager.planner == 'path_planner':   
                 goal = path_planner.msg.path_plannerGoal()
             goal.path.header.stamp = rospy.Time.now()
-            if task['type'] == 'goto':
+            if task['type'] in ('goto', 'hover'):
                 path = task['path']
             if task['type'] == 'mission_plan':
                 if task['transit_path'] is not None:
@@ -604,7 +715,15 @@ class FollowPath(MMState):
                         self.path_planner_client.cancel_goal()
                 return ret
             if self.task_complete:
+                if task['type'] == 'hover':
+                    return 'hover'
                 return 'done'
+            if task['type'] == 'hover' and self.missionManager.waypointReached(task['latitude'], task['longitude']):
+              if self.missionManager.planner == 'path_follower':
+                self.path_follower_client.cancel_goal()
+              elif self.missionManager.planner == 'path_planner':
+                self.path_planner_client.cancel_goal()
+              return 'hover'
 
     def path_follower_done_callback(self, status, result):
         self.task_complete = True
@@ -613,6 +732,11 @@ class FollowPath(MMState):
         pass
     
     def path_follower_feedback_callback(self, msg):
+        task = self.missionManager.getCurrentTask()
+        if task is not None:
+            if 'path_type' in task and task['path_type'] == 'transit':
+                pass
+                #print(msg)
         pass
 
 class SurveyArea(MMState):
@@ -626,11 +750,12 @@ class SurveyArea(MMState):
         if task is not None:
             goal = manda_coverage.msg.manda_coverageGoal()
             for wp in task['nav_objectives'][task['current_nav_objective_index']]['children']:
-                print(wp)
-                gp = GeoPoint()
-                gp.latitude = wp['latitude']
-                gp.longitude = wp['longitude']
-                goal.area.append(gp)
+                #print(wp)
+                if wp["type"] == 'Waypoint':
+                    gp = GeoPoint()
+                    gp.latitude = wp['latitude']
+                    gp.longitude = wp['longitude']
+                    goal.area.append(gp)
             goal.speed = task['default_speed']
             self.task_complete = False
             self.survey_area_client.wait_for_server()
@@ -670,10 +795,10 @@ def main():
         with sm_auto:
             smach.StateMachine.add('IDLE', Idle(missionManager), transitions={'do-task':'NEXTTASK', 'pause':'pause'})
             smach.StateMachine.add('NEXTTASK', NextTask(missionManager), transitions={'idle':'IDLE', 'mission_plan':'MISSIONPLAN', 'hover':'HOVER', 'goto':'GOTO'})
-            smach.StateMachine.add('HOVER', Hover(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK'})
+            smach.StateMachine.add('HOVER', Hover(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK', 'follow_path':'FOLLOWPATH'})
             smach.StateMachine.add('MISSIONPLAN', MissionPlan(missionManager), transitions={'done':'NEXTTASK', 'follow_path':'FOLLOWPATH', 'survey_area':'SURVEYAREA'})
             smach.StateMachine.add('GOTO',Goto(missionManager), transitions={'done':'NEXTTASK', 'follow_path':'FOLLOWPATH'})
-            smach.StateMachine.add('FOLLOWPATH', FollowPath(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK', 'done':'LINEENDED'})
+            smach.StateMachine.add('FOLLOWPATH', FollowPath(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK', 'done':'LINEENDED', 'hover':'HOVER'})
             smach.StateMachine.add('LINEENDED', LineEnded(missionManager), transitions={'mission_plan': 'MISSIONPLAN', 'next_item':'NEXTTASK'})
             smach.StateMachine.add('SURVEYAREA', SurveyArea(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK', 'done':'NEXTTASK'})
 
