@@ -1,0 +1,6 @@
+default_speed: 2.75   # m/s
+turn_radius: 10.0
+hover_minimum_distance: 5.0
+hover_maximum_distance: 50.0
+hover_maximum_speed: 1.0 # m/s
+
