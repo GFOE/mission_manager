@@ -241,6 +241,7 @@ class MissionManagerCore(object):
         parts = args.split(None,1)
         rospy.loginfo("mission_manager: Adding task with arguments: %s"%parts)
         if len(parts) == 2:
+            task = None
             task_type = parts[0]
             task_list = []
             if task_type == 'mission_plan':
@@ -259,6 +260,7 @@ class MissionManagerCore(object):
             else:
                 rospy.logerr("mission_manager: No defined task of type <%s> "
                              "from task string <%s>"%(task_type, args))
+                
             if task is not None: 
                 if prepend:
                     self.tasks.insert(0,task)
