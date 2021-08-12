@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-'''
-Mission Manager
+""" Mission Manager Node
 
 Subscribes:
 
@@ -14,12 +13,13 @@ Publishes:
 * "project11/status/mission_manager" with Heartbeat - includes a number of key/value pairs to describe the current status of the `state machine and MissionManagerCore object.
 
 Dynamic Reconfiguration:
+
 Uses reconfiguration server for parameters - see mission_manager/cfg 
 
 TODO: Create a Task class, as an alternative to an unconstrained dictionary, 
 to define the attributes and methods of an object. 
 
-'''
+"""
 
 import rospy
 import smach
@@ -57,24 +57,30 @@ import json
 import math
 
 class MissionManagerCore(object):
-    '''
-    Singleton class instantiated by main.
-    '''
+    """Singleton class instantiated by main.
+
+    TODO: Add attribute descriptions for key public attributes.
+
+    Attributes:
+        odometry: An Odometry ROS message to store vehicle state.
+
+    """
     def __init__(self):
-        '''
-        Initializes task accounting attributes.
-        Creates subscribers.
-        Initiated dynamic reconfiguration
-        Starts tf2 transform listener.
-        '''
+        """ Inits MissionManager Core.
+        
+        * Initializes task accounting attributes.
+        * Creates subscribers.
+        * Initiates dynamic reconfiguration
+        * Starts tf2 transform listener.
+        """
         self.piloting_mode = 'standby'
         self.odometry = None
 
-        ''' 
+        """ 
         List of tasks to do, or already done.
         Keeping all the tasks allows us to run them in a loop
         Elements of the list are dictionary objects - see addTask()
-        '''
+        """
         self.tasks = []
         # List of tasks to be done. Once a task is completed,
         # it is dropped from this list. Overrides get prepended here.
@@ -103,12 +109,14 @@ class MissionManagerCore(object):
         rospy.Subscriber('project11/heartbeat', Heartbeat,
                          self.heartbeatCallback, queue_size = 1)
 
-        self.status_publisher = rospy.Publisher('project11/status/mission_manager',
-                                                Heartbeat, queue_size = 10)
-        self.endofline_publisher = rospy.Publisher('project11/endofline', String, queue_size = 1)
-        self.display_publisher = rospy.Publisher('project11/display', GeoVizItem, queue_size = 1)
+        self.status_publisher = rospy.Publisher(
+            'project11/status/mission_manager',
+            Heartbeat, queue_size = 10)
+        self.endofline_publisher = rospy.Publisher('project11/endofline',
+                                                   String, queue_size = 1)
+        self.display_publisher = rospy.Publisher('project11/display',
+                                                 GeoVizItem, queue_size = 1)
 
-        
         # Dynamic reconfiguration server.
         self.config_server = Server(mission_managerConfig,
                                     self.reconfigure_callback)
@@ -117,29 +125,47 @@ class MissionManagerCore(object):
         self.listener = tf2_ros.TransformListener(self.tfBuffer)
 
     def pilotingModeCallback(self, msg):
-        '''
-        To change piloting mode to value given by String
-        '''
+        """ Called by ROS subscriber to hange piloting_mode string.
+
+        Args:
+          msg: A std_msgs/String 
+        """
         self.piloting_mode = msg.data
 
     def heartbeatCallback(self, msg):
-        '''
-        Can also change piloting mode this way.
-        '''
+        """ Called by ROS subscriber to change piloting_mode strong.
+
+        Note that this can also be done throught he pilotingModeCallback.
+
+        Args: 
+          msg: A marine_msgs/Heartbeat message.
+        """
         for kv in msg.values:
             if kv.key == 'piloting_mode':
                 self.piloting_mode = kv.value
             
     def odometryCallback(self, msg):
-        '''
-        Stores navigation Odometry
-        '''
+        """ Stores navigation Odometry as class attribute.
+
+        Args:
+          msg: A nav_msgs/Odometry message.
+        """
         self.odometry = msg
         
     def reconfigure_callback(self, config, level):
-        '''
-        Ingest dynamic reconfiguration.
-        '''
+        """ Changes configuration attributes dynamic reconfiguration.
+
+        Args:
+          config: 
+            Dictionary with keys and values described in the 
+            cfg/mission_manager.cfg file.
+          level: 
+            A bitmask which will later be passed to the dynamic reconfigure 
+            callback. When the callback is called all of the level values 
+            for parameters that have been changed are ORed together and 
+            the resulting value is passed to the callback.
+            http://wiki.ros.org/dynamic_reconfigure/Tutorials/HowToWriteYourFirstCfgFile
+        """
         self.waypointThreshold = config['waypoint_threshold']
         self.turnRadius = config['turn_radius']
         self.segmentLength = config['segment_length']
@@ -156,21 +182,29 @@ class MissionManagerCore(object):
         return config
         
     def getPilotingMode(self):
-        '''
-        Access method - seems not terribly useful since Python doesn't 
-        have private attributes.
-        '''
+        """ Access method for piloting_mode attribute. 
+
+        TODO:
+        Seems not terribly useful since Python doesn't have private attributes.
+        Why not just access attribute of the class?
+
+        Returns:
+          The piloting_mode attribute str.
+        """
         return self.piloting_mode
     
     def commandCallback(self, msg, args):
-        '''
-        Receives command String
+        """ Receives ROS command String.
 
-        :param String msg: Formated string, delimited by whitespace, describing
-                           task_type and task parameters.
-        :param String args: Use callback_args functionality of subscriber to 
-                            pass topic name.
-        '''
+        Args:
+          msg: 
+            A std_msg/String message.
+            Formated string, delimited by whitespace, describing task_type 
+            and task parameters.
+          args: 
+            A str, using callback_args functionality of subscriber to 
+            pass topic name.
+        """
 
         rospy.loginfo("mission_manager: Received command string <%s>"
                       "on topic <%s>"%(str(msg.data), args))
@@ -182,8 +216,6 @@ class MissionManagerCore(object):
         else:
             args = None
                 
-        #print 'command:',cmd,'args:',args
-        
         if cmd == 'replace_task':
             self.clearTasks()
             self.addTask(args)
@@ -218,26 +250,29 @@ class MissionManagerCore(object):
         
 
     def clearTasks(self):
-        '''
-        Empties the tasks list and sets current_task to None
+        """ Empties the tasks list and sets current_task to None.
+
         Called with a command of "clear_task" or "replace_task" is received.
-        '''
+        """
         self.tasks = []
         self.current_task = None
         self.saved_task = None
 
     def addTask(self, args, prepend=False):
-        '''
-        Appends or prepends an element to the "tasks" list attribute.
+        """ Appends or prepends an element to the "tasks" list attribute.
+
         Called when "append_task" or "prepend_task" commands are received.
 
         Tasks are dictionaries with a variety of keys.  Each dictionary 
         includes a 'type' key.
 
-        :param str args: The task definition string (see README.md)
-                         The remainder of the string sent with the command.
-                         See README.md for task string syntax.
-        '''
+        Args:
+          args: 
+            A str that is the task definition string (see README.md)
+            The remainder of the string sent with the command.
+            See README.md for task string syntax.
+          prepend: A bool to prepend (true) or append (false).
+        """
         parts = args.split(None,1)
         rospy.loginfo("mission_manager: Adding task with arguments: %s"%parts)
         if len(parts) == 2:
@@ -277,22 +312,32 @@ class MissionManagerCore(object):
         rospy.loginfo('mission_manager: tasks : %s'%str(self.tasks))
 
     def setOverride(self, task):
+        """ TODO: Describe what this does?
+
+        Args:
+          task: 
+            A dictionary defining the task. 
+            TODO: Point to where the task dictionary sematics are described.
+        """
         self.override_task = task
         self.pending_command = 'do_override'
         
     def parseLatLong(self,args):
-        '''
+        """ Splits a string into latitude and longitude.
+
         Splits a string in two and crates a dictionary with 
         latitude and longitude keys and float values.
 
         TODO: No reason this should be a method of the object.
               Should be a function.
-
-        :param str args: Should be a string of two float numbers 
-                         separated by whitespace.  Order matters.
-        :returns Dict with key/values for latitude and longitude
-        :rtype dict
-        '''
+        
+        Args:
+          args: 
+            A str of two float numbers separated by whitespace.  
+        
+        Returns:
+          A dict with keys 'latitude' and 'longitude' and float values.
+        """
         latlon = args.split()
         if len(latlon) == 2:
             try:
@@ -310,8 +355,8 @@ class MissionManagerCore(object):
         return None
 
     def parseMission(self, plan, default_speed):
-        '''
-        Create a task dict from a json description.
+        """ Create a task dict from a json description.
+        
         Called when a "mission_plan" command is received.
 
         TODO: No reason this should be a method of the object.
@@ -319,11 +364,14 @@ class MissionManagerCore(object):
         
         TODO: The interface changed - need to check documentation.
         
-        :param str: json formatted description of a mission. 
-        :param float default_speed
-        :return: Task dictionary for mission as described by mp json
-        :rtype: dict
-        '''
+        Args:
+          plan: A str in json format describing a mission. 
+          default_speed: A float speed in m/s.
+
+        Returns:
+          A dict describing the task dictionary for mission 
+          described by the plan json.
+        """
         ret = []
         speed = default_speed
         
@@ -364,8 +412,7 @@ class MissionManagerCore(object):
         return ret
 
     def position(self):
-        '''
-        Return position lat/lon.
+        """ Return last known position lat/lon of the vehicle.
 
         TODO: This should not be a method of the object.  Should be a general
               purpose function, probably in project11 module.  
@@ -378,9 +425,10 @@ class MissionManagerCore(object):
         2. The wgs84.py module from project11 is used to transfrom 
         ECEF -> lat/lon
 
-        :returns Lat/Long in radians and altitude in meters.
-        :rtype tuple 
-        '''
+        Returns:
+          A tuple of length three with 
+          Lat/Long in radians and altitude in meters.
+        """
         if self.odometry is None:
             rospy.logwarn("mission_manager: There is no current odomentry, "
                           "so can't determine position!")
@@ -398,16 +446,15 @@ class MissionManagerCore(object):
         return project11.wgs84.fromECEFtoLatLong(ecef.x, ecef.y, ecef.z)
 
     def heading(self):
-        '''
-        Uses current odometry message to return heading in degrees NED.
+        """Uses current odometry message to return heading in degrees NED.
 
         TODO: This should not be a method of the object.  Should be a general
               purpose function, probably in project11 module.  
               Not specific to this program.
 
-        :returns heading, degrees, NED.
-        :rtype float
-        '''
+        Returns:
+          A float for heading, degrees, NED.
+        """
         
         if self.odometry is not None:
             o = self.odometry.pose.pose.orientation
@@ -415,7 +462,8 @@ class MissionManagerCore(object):
             return 90.0-math.degrees(euler_from_quaternion(q)[2])
       
     def distanceTo(self, lat, lon):
-        '''
+        """ Returns distance from current vehicle position to given location.
+
         Uses position() function and lat/lon arguments to report 
         distance in meters.
 
@@ -423,12 +471,14 @@ class MissionManagerCore(object):
               purpose function, probably in project11 module.  
               Not specific to this program.
 
-        :param float lat: latitude, degrees
-        :param float lon: longitude, degrees
-        :returns distance in meters 
-                 from current position (lat, lon)  to lat, lon)
-        :rytpe float
-        '''
+        Args:
+          lat: A float, latitude, degrees
+          lon: A float, longitude, degrees
+        
+        Returns: 
+          A float, distance in meters 
+          from current position (lat, lon)  to lat, lon)
+        """
         p_rad = self.position()
         current_lat_rad = p_rad[0]
         current_lon_rad = p_rad[1]
@@ -441,7 +491,8 @@ class MissionManagerCore(object):
         return distance
 
     def headingToPoint(self,lat,lon):
-        '''
+        """ Returns bearing from current vehicle position to given location.
+
         Uses position() function output and lat/lon to report
         bearing from current position to lat/lon.
 
@@ -454,12 +505,13 @@ class MissionManagerCore(object):
 
         TODO: Change name of headingToPoint() and/or distanceTo() functions to 
               be consistent.
-
-        :param float lat: latitude, degrees
-        :param float lon: longitude, degrees
-        :returns bearing to target lat/lon, degrees, NED.
-        :rytpe float
-        '''
+        Args:
+          lat: A float, latitude, degrees
+          lon: A float, longitude, degrees
+        
+        Returns: 
+          A float, dbearing to target location, degrees, NED.
+        """
         p = self.position()
         dest_lat_rad = math.radians(lat)
         dest_lon_rad = math.radians(lon)
@@ -469,7 +521,7 @@ class MissionManagerCore(object):
         return math.degrees(azimuth)
     
     def waypointReached(self, lat, lon):
-      ''' TODO: Write Doc'''
+      """ TODO: Write Doc"""
       d = self.distanceTo(lat, lon)
       if d is None:
         return False
@@ -477,8 +529,9 @@ class MissionManagerCore(object):
 
 
     def generatePathFromVehicle(self, targetLat, targetLon, targetHeading):
-        '''
-        Wraps geneatePath() to create path from current position/heading
+        """ Wraps geneatePath() to create path.
+
+        Crates path from current position/heading
         to target position/heading
 
         TODO: This should not be a method of the object.  Should be a general
@@ -488,12 +541,14 @@ class MissionManagerCore(object):
         TODO: Should be more specific name, such as 
               generateDubinsPathFromVehicle()
 
-        :param float targetLat: Latitude - believe in radians?
-        :param float targetLon: Longitude - believe in radians?
-        :param float targetHeading: Degrees, NED
-        :returns path: as an array of geographic_msgs/GeoPose objects
-        :rtype geographic_msgs/GeoPose[]
-        '''
+        Args:
+          targetLon: A float, Latitude - believe in radians?
+          targetLon: A float, Longitude - believe in radians?
+          targetHeading: A float, degrees, NED
+        Returns:
+           An array of geographic_msgs/GeoPose objects
+           geographic_msgs/GeoPose[]
+        """
         
         p = self.position()
         h = self.heading()
@@ -503,7 +558,8 @@ class MissionManagerCore(object):
 
     def generatePath(self, startLat, startLon, startHeading,
                      targetLat, targetLon, targetHeading):
-        '''
+        """ Create Dubin's curve path from start to target.
+
         Uses the dubins_curves ROS project services to create a path
         from start to target.
 
@@ -514,15 +570,17 @@ class MissionManagerCore(object):
         TODO: Should be more specific name, such as 
               generateDubinsPath()
 
-        :param float startLat: Latitude - believe in radians?
-        :param float startLon: Longitude - believe in radians?
-        :param float startHeading: degrees, NED.
-        :param float targetLat: Latitude - believe in radians?
-        :param float targetLon: Longitude - believe in radians?
-        :param float targetHeading: degrees, NED.
-        :returns path: as an array of geographic_msgs/GeoPose objects
-        :rtype geographic_msgs/GeoPose[]
-        '''
+        Args:
+          startLat: Float,  Latitude - believe in radians?
+          startLon: Float, Longitude - believe in radians?
+          startHeading: Float, degrees, NED.
+          targetLat: Float, Latitude - believe in radians?
+          targetLon: Float, Longitude - believe in radians?
+          targetHeading: Float degrees, NED.
+        Returns:
+           An array of geographic_msgs/GeoPose objects
+           geographic_msgs/GeoPose[]
+        """
         #rospy.loginfo('generatePath: from:',startLat,startLon,
         #   'to:',targetLat,targetLon)
         service_name = 'dubins_curves_latlong'
@@ -576,7 +634,8 @@ class MissionManagerCore(object):
         return dubins_path.path
 
     def segmentHeading(self, start_lat, start_lon, dest_lat, dest_lon):
-        '''
+        """ Returns bearing of a geodesic line.
+
         Uses python11.geodesic library to determine bearing (degrees, NED)
         from start lat/lon to destination lat/lon.
 
@@ -584,9 +643,11 @@ class MissionManagerCore(object):
               purpose function, probably in project11 module.  
               Not specific to this program.
 
-        :param float start_lat: starting latitude, degrees
-        :returns Bearing from start lat/lon to dest lat/lon, degrees, NED.
-        '''
+        TODO: Write Args documentation.
+
+        Returns:
+          A float, bearing from start lat/lon to dest lat/lon, degrees, NED.
+        """
         start_lat_rad = math.radians(start_lat)
         start_lon_rad = math.radians(start_lon)
 
@@ -598,20 +659,22 @@ class MissionManagerCore(object):
         return math.degrees(path_azimuth)
 
     def headingToYaw(self, heading):
-        '''
-        Utility function convert heading (degrees, NED) to yaw (degress, ENU)
+        """ Utility to convert heading (degrees, NED) to yaw (degress, ENU).
 
         TODO: Should not be a method of the object - should be a 
         utility function in a separate module.
 
-        :param float heading: degrees, NED
-        :returns yaw: degrees, ENU
-        :rtype float
-        '''
+        Args:
+          heading: float heading: degrees, NED
+          
+        Returns:
+          Float, yaw: degrees, ENU
+        """
         return 90.0-heading
 
     def iterate(self, current_state):
-        '''
+        """ Affords query by state machine.
+
         Method called by the SMACH state execution as the interface between
         the state machines and the MissionManagerCore.
         
@@ -625,12 +688,17 @@ class MissionManagerCore(object):
         phrased as commands, they should be {exit, pause, cancel}.
 
 
-        :param str current_state Arbitrary string - typically the name of the 
-                                 SMACH state object that called the function.
-        :returns String to communicate to SMACH state classes what to do next
+        Args:
+          current_state: 
+            A str current_state Arbitrary string - typically the name of the 
+            SMACH state object that called the function.
+        
+        Returns:
+          A str OR None.
+          The str communicates to SMACH state classes what to do next
                  which can be {'exit', 'pause', 'cancelled'} 
                                  or None
-        '''
+        """
         if rospy.is_shutdown():
             rospy.loginfo("mission_manager: ROS is shutdown, so telling "
                           "state to 'exit'")
@@ -654,11 +722,10 @@ class MissionManagerCore(object):
         return None          
 
     def nextTask(self):
-        '''
-        Executed by the NextTask class execute method.
-
-        :returns None
-        '''
+        """ Executed by the NextTask class execute method.
+        
+        TODO: Write more documentation about what this does.
+        """
 
         rospy.loginfo('mission_manager.nextTask: pending_command: %s'%
                       str(self.pending_command))
@@ -749,32 +816,33 @@ class MissionManagerCore(object):
 
     
     def getCurrentTask(self):
-        '''
-        Returns either the current_task or the override_task attribute
+        """ Returns either the current_task or the override_task attribute
 
         TODO: Surprising behavior that it doesn't always access 
         the current_task attribute.  Get rid of the access method. 
         Python doesn't have private attributes.
 
-        :returns Task dictionary 
-        '''
+        Returns:
+          A Task dict
+        """
         if self.override_task is not None:
             return self.override_task
         return self.current_task
 
     
     def publishStatus(self, state):
-        '''
+        """ ROS publish Heartbeat message with mission, task and state info.
+        
         Publish Heatbeat message with mission, task and state information
         stuffed into the key/value pairs of the message.
 
         TODO: Add a list of allowable state strings and validate that the 
               input argument is one one of the allowed states.
         
-        :param str state: An arbitrary string that is added to the Heartbeat
+        Args:
+          state: An arbitrary str that is added to the Heartbeat
                           message as the value associated with key=state.
-        :returns None
-        '''
+        """
         hb = Heartbeat()
         hb.header.stamp = rospy.Time.now()
 
@@ -790,7 +858,8 @@ class MissionManagerCore(object):
         if self.current_task is None:
             p = self.position()
             if p is not None:
-                lastPosition = {'latitude': math.degrees(p[0]), 'longitude': math.degrees(p[1])}
+                lastPosition = {'latitude': math.degrees(p[0]),
+                                'longitude': math.degrees(p[1])}
             lastHeading = self.heading()
 
         for t in self.tasks:
@@ -806,10 +875,18 @@ class MissionManagerCore(object):
                     if len(nav_o['waypoints']) >= 2:
                         wp1 = nav_o['waypoints'][0]
                         wp2 = nav_o['waypoints'][1]
-                        nextHeading = self.segmentHeading(wp1['latitude'], wp1['longitude'], wp2['latitude'], wp2['longitude'])
-                    elif len(nav_o['waypoints']) == 1 and lastPosition is not None:
+                        nextHeading = self.segmentHeading(wp1['latitude'],
+                                                          wp1['longitude'],
+                                                          wp2['latitude'],
+                                                          wp2['longitude'])
+                    elif ((len(nav_o['waypoints']) == 1) and
+                          (lastPosition is not None)):
                         wp1 = nav_o['waypoints'][0]
-                        nextHeading = self.segmentHeading(lastPosition['latitude'], lastPosition['longitude'], wp1['latitude'], wp1['longitude'])
+                        nextHeading = self.segmentHeading(
+                            lastPosition['latitude'],
+                            lastPosition['longitude'],
+                            wp1['latitude'],
+                            wp1['longitude'])
                     if nextHeading is not None and lastHeading is not None:
                         gvpl = GeoVizPointList() # transit line
                         gvpl.color.a = 0.5
@@ -817,8 +894,17 @@ class MissionManagerCore(object):
                         gvpl.color.g = 0.4
                         gvpl.color.b = 0.4
                         gvpl.size = 2
-                        pre_start = project11.geodesic.direct(math.radians(wp1['longitude']), math.radians(wp1['latitude']), math.radians(nextHeading+180), self.lineup_distance)
-                        for p in self.generatePath(lastPosition['latitude'], lastPosition['longitude'], lastHeading, math.degrees(pre_start[1]), math.degrees(pre_start[0]), nextHeading):
+                        pre_start = project11.geodesic.direct(
+                            math.radians(wp1['longitude']),
+                            math.radians(wp1['latitude']),
+                            math.radians(nextHeading+180),
+                            self.lineup_distance)
+                        for p in self.generatePath(lastPosition['latitude'],
+                                                   lastPosition['longitude'],
+                                                   lastHeading,
+                                                   math.degrees(pre_start[1]),
+                                                   math.degrees(pre_start[0]),
+                                                   nextHeading):
                             gvpl.points.append(p.position)
                         gp = GeoPoint()
                         gp.latitude = wp1['latitude']
@@ -842,41 +928,48 @@ class MissionManagerCore(object):
                         if len(nav_o['waypoints']) >= 2:
                             wp1 = nav_o['waypoints'][-2]
                             wp2 = nav_o['waypoints'][-1]
-                            lastHeading = self.segmentHeading(wp1['latitude'], wp1['longitude'], wp2['latitude'], wp2['longitude'])
+                            lastHeading = self.segmentHeading(wp1['latitude'],
+                                                              wp1['longitude'],
+                                                              wp2['latitude'],
+                                                              wp2['longitude'])
 
         self.display_publisher.publish(gvi)                
                     
         if self.current_task is None:
             hb.values.append(KeyValue('current_task','None'))
         else:
-            hb.values.append(KeyValue('current_task_type',self.current_task['type']))
+            hb.values.append(KeyValue('current_task_type',
+                                      self.current_task['type']))
             if self.current_task['type'] == 'mission_plan':
-                hb.values.append(KeyValue('current_task_label',self.current_task['label']))
-                hb.values.append(KeyValue('current_task_nav_objective_count',str(len(self.current_task['nav_objectives']))))
-                hb.values.append(KeyValue('current_task_nav_objective_index',str(self.current_task['current_nav_objective_index'])))
+                hb.values.append(KeyValue('current_task_label',
+                                          self.current_task['label']))
+                hb.values.append(
+                    KeyValue('current_task_nav_objective_count',
+                             str(len(self.current_task['nav_objectives']))))
+                hb.values.append(
+                    KeyValue('current_task_nav_objective_index',
+                             str(self.current_task['current_nav_objective_index'])))
         self.status_publisher.publish(hb)
                
 class MMState(smach.State):
-    '''
-    Base state for Mission Manager states
+    """Base state for Mission Manager states.
 
     TODO: The update rate / sleep period is fixed in the states. 
     Add a base class method and attribute to parameterize the update rate.
-    '''
+    """
     def __init__(self, mm, outcomes):
         smach.State.__init__(self, outcomes=outcomes)
         self.missionManager = mm
         
 class Pause(MMState):
-    '''
-    This state is for all top level piloting_mode other than autonomous
+    """This state is for all top level piloting_mode other than autonomous
 
     TODO: Instead of a semi-infinite loop, have this state transition
     back to itself if the mode is still not 'autonomous'
 
     Stays in this state while piloting_mode is not 'autonomous'
     and ros is not shutdown.
-    '''
+    """
     def __init__(self, mm):
         MMState.__init__(self, mm, outcomes=['resume','exit'])
         
@@ -889,8 +982,7 @@ class Pause(MMState):
         return 'resume'
 
 class Idle(MMState):
-    """
-    In autonomous mode, but with no pending tasks.
+    """In autonomous mode, but with no pending tasks.
 
     TODO: The 'exit' outcome is specified, but there is no associated 
     transition.  Should remove the outcome or define the transition.
@@ -900,7 +992,7 @@ class Idle(MMState):
         MMState.__init__(self, mm, outcomes=['exit','do-task','pause'])
         
     def execute(self, userdata):
-        '''
+        """
         Loop repeates infinitely
           if ( (interate() returns None) and
                (missionManager.tasks queue is empty) )
@@ -909,7 +1001,7 @@ class Idle(MMState):
 
         TODO: Replace semi-infinite loop with state transition back to same
               state.
-        '''
+        """
         while True:
             ret = self.missionManager.iterate('Idle')
             if ret == 'cancelled':
@@ -922,6 +1014,8 @@ class Idle(MMState):
                 return 'do-task'
 
 class NextTask(MMState):
+    """ TODO: Write doc.
+    """
     def __init__(self, mm):
         MMState.__init__(self, mm, outcomes=['idle','mission_plan',
                                              'goto','hover'])
@@ -935,11 +1029,11 @@ class NextTask(MMState):
         return 'idle'
 
 class Hover(MMState):
-    '''
-    SMACH state object 
+    """SMACH state object to interface with hover ROS action.
+
     Interfaces with the hover action - see hover repository for action spec.
     
-    '''
+    """
     def __init__(self, mm):
 
         MMState.__init__(self, mm, outcomes=['cancelled', 'exit', 'pause', 'follow_path'])
@@ -1000,23 +1094,23 @@ class Hover(MMState):
                       "\t state: %s ,result: %s"%(str(state),str(result)))
 
 class LineEnded(MMState):
-    '''
-    SMACH state object
+    """SMACH state object.
 
     TODO: This state doesn't appear to have much purpose in the 
           GOTO use case, were we transition here from GOTO and then 
           straight to NEXTTASK
-    '''
+    """
     def __init__(self,mm):
         MMState.__init__(self, mm, outcomes=['mission_plan','next_item'])
 
     def execute(self, userdata):
-        '''
+        """TODO: Write brief doc.
+
         For the GOTO use-case, this just sets pending_command and 
         transitions to NEXTTASK.
 
         TODO: Describe the MISSIONPLAN use-case
-        '''
+        """
         task = self.missionManager.getCurrentTask()
         if task is not None and task['type'] == 'mission_plan':
             if task['transit_path'] is not None:
@@ -1032,6 +1126,8 @@ class LineEnded(MMState):
 
         
 class MissionPlan(MMState):
+    """TODO: Write doc.
+    """
     def __init__(self, mm):
         MMState.__init__(self, mm, outcomes=['follow_path',
                                              'survey_area','done'])
@@ -1080,16 +1176,16 @@ class MissionPlan(MMState):
             task['do_transit'] = True
         
 class Goto(MMState):
-    '''
+    """
     SMACH state object
     
 
-    '''
+    """
     def __init__(self, mm):
         MMState.__init__(self, mm, outcomes=['done','follow_path'])
         
     def execute(self, userdata):
-        '''
+        """
         If we are close to waypoint - returns 'done'
         Otherwise, plans the Dubin's path and returns 'follow_path'
 
@@ -1100,7 +1196,7 @@ class Goto(MMState):
         TODO: The path is stuffed back into the MissionManagerCore.task
         attribute.  Would it be cleaner to use userdata to pass the path
         to the follower?
-        '''
+        """
         task = self.missionManager.getCurrentTask()
         if task is not None:
             dist = self.missionManager.distanceTo(task['latitude'],
@@ -1130,23 +1226,25 @@ class Goto(MMState):
                           "- so GOTO state has undefined return.")
         
 class FollowPath(MMState):
-    '''
-    SMACH state object.
+    """SMACH state object.
 
     Uses either path_follower action OR path_planner action, 
     depending on the string attribute MissionManagerCore.planner.
 
 
-    '''
+    """
     def __init__(self, mm):
-        '''
+        """
         Initiates path_follower and path_planner action clients.
-        '''
-        MMState.__init__(self, mm, outcomes=['done','cancelled','exit','pause', 'hover'])
-        self.path_follower_client = actionlib.SimpleActionClient('path_follower_action', 
-                                                                 path_follower.msg.path_followerAction)
-        self.path_planner_client = actionlib.SimpleActionClient('path_planner_action', 
-                                                                path_planner.msg.path_plannerAction)
+        """
+        MMState.__init__(self, mm, outcomes=['done','cancelled',
+                                             'exit','pause', 'hover'])
+        self.path_follower_client = actionlib.SimpleActionClient(
+            'path_follower_action', 
+            path_follower.msg.path_followerAction)
+        self.path_planner_client = actionlib.SimpleActionClient(
+            'path_planner_action', 
+            path_planner.msg.path_plannerAction)
         self.task_complete = False
         
     def execute(self, userdata):
@@ -1174,7 +1272,7 @@ class FollowPath(MMState):
             # Sends goal to either path_follower or
             # path_planner action client.
 
-            '''
+            """
             The planner attribute is a string which specifies which
             path follwer action client to use.
             Here we assign the generic 'follower_client' object 
@@ -1184,7 +1282,7 @@ class FollowPath(MMState):
                   action interface.  Currently they each use their own 
                   interface description.  This interface should be generalized
                   for future "follower" actions server/clients as well.
-            '''
+            """
             # Default is path_follower
             follower_client = self.path_follower_client
             if self.missionManager.planner == 'path_follower':
@@ -1229,7 +1327,9 @@ class FollowPath(MMState):
                 if task['type'] == 'hover':
                     return 'hover'
                 return 'done'
-            if task['type'] == 'hover' and self.missionManager.waypointReached(task['latitude'], task['longitude']):
+            if ((task['type'] == 'hover') and
+                (self.missionManager.waypointReached(task['latitude'],
+                                                     task['longitude']))):
               if self.missionManager.planner == 'path_follower':
                 self.path_follower_client.cancel_goal()
               elif self.missionManager.planner == 'path_planner':
@@ -1237,15 +1337,13 @@ class FollowPath(MMState):
               return 'hover'
 
     def callbackFollowerActive(self):
-        '''
-        Callback for follower action client interface 
-        '''
+        """Callback for follower action client interface.
+        """
         rospy.loginfo("mission_manager: follower action client is active.")    
     
     def callbackFollowerFeedback(self, feedback):
-        '''
-        Callback for follower action client interface 
-        '''
+        """Callback for follower action client interface.
+        """
         rospy.loginfo_throttle(2.0, "mission_manager.FollowPath: "
                                "follower action feedback: "
                                "%s"%str(feedback))
@@ -1257,9 +1355,8 @@ class FollowPath(MMState):
         
     
     def callbackFollowerDone(self, status, result):
-        '''
-        Callback for follower action client interface 
-        '''
+        """Callback for follower action client interface
+        """
         rospy.loginfo("mission_manager.FollowPath: follower action done: \n"
                       "\t status: %s ,result: %s"%(str(status),str(result)))
         # Tell MissionManagerCore that the task is complete
@@ -1321,11 +1418,10 @@ class SurveyArea(MMState):
     
     
 def main():
-    '''
-    Main
+    """Main.
 
     Instatiates MissionManagerCore and SMACH state machine(s)
-    '''
+    """
     rospy.init_node('MissionManager')
     
     missionManager = MissionManagerCore()
@@ -1340,16 +1436,43 @@ def main():
         sm_auto = smach.StateMachine(outcomes=['pause','exit'])
         
         with sm_auto:
-            smach.StateMachine.add('IDLE', Idle(missionManager), transitions={'do-task':'NEXTTASK', 'pause':'pause'})
-            smach.StateMachine.add('NEXTTASK', NextTask(missionManager), transitions={'idle':'IDLE', 'mission_plan':'MISSIONPLAN', 'hover':'HOVER', 'goto':'GOTO'})
-            smach.StateMachine.add('HOVER', Hover(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK', 'follow_path':'FOLLOWPATH'})
-            smach.StateMachine.add('MISSIONPLAN', MissionPlan(missionManager), transitions={'done':'NEXTTASK', 'follow_path':'FOLLOWPATH', 'survey_area':'SURVEYAREA'})
-            smach.StateMachine.add('GOTO',Goto(missionManager), transitions={'done':'NEXTTASK', 'follow_path':'FOLLOWPATH'})
-            smach.StateMachine.add('FOLLOWPATH', FollowPath(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK', 'done':'LINEENDED', 'hover':'HOVER'})
-            smach.StateMachine.add('LINEENDED', LineEnded(missionManager), transitions={'mission_plan': 'MISSIONPLAN', 'next_item':'NEXTTASK'})
-            smach.StateMachine.add('SURVEYAREA', SurveyArea(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK', 'done':'NEXTTASK'})
+            smach.StateMachine.add('IDLE',
+                                   Idle(missionManager),
+                                   transitions={'do-task':'NEXTTASK',
+                                                'pause':'pause'})
+            smach.StateMachine.add('NEXTTASK',
+                                   NextTask(missionManager),
+                                   transitions={'idle':'IDLE',
+                                                'mission_plan':'MISSIONPLAN',
+                                                'hover':'HOVER',
+                                                'goto':'GOTO'})
+            smach.StateMachine.add('HOVER', Hover(missionManager),
+                                   transitions={'pause':'pause',
+                                                'cancelled':'NEXTTASK',
+                                                'follow_path':'FOLLOWPATH'})
+            smach.StateMachine.add('MISSIONPLAN', MissionPlan(missionManager),
+                                   transitions={'done':'NEXTTASK',
+                                                'follow_path':'FOLLOWPATH',
+                                                'survey_area':'SURVEYAREA'})
+            smach.StateMachine.add('GOTO',Goto(missionManager),
+                                   transitions={'done':'NEXTTASK',
+                                                'follow_path':'FOLLOWPATH'})
+            smach.StateMachine.add('FOLLOWPATH', FollowPath(missionManager),
+                                   transitions={'pause':'pause',
+                                                'cancelled':'NEXTTASK',
+                                                'done':'LINEENDED',
+                                                'hover':'HOVER'})
+            smach.StateMachine.add('LINEENDED', LineEnded(missionManager),
+                                   transitions={'mission_plan': 'MISSIONPLAN',
+                                                'next_item':'NEXTTASK'})
+            smach.StateMachine.add('SURVEYAREA', SurveyArea(missionManager),
+                                   transitions={'pause':'pause',
+                                                'cancelled':'NEXTTASK',
+                                                'done':'NEXTTASK'})
 
-        smach.StateMachine.add('AUTONOMOUS', sm_auto, transitions={'pause':'PAUSE', 'exit':'exit'})
+        smach.StateMachine.add('AUTONOMOUS', sm_auto,
+                               transitions={'pause':'PAUSE',
+                                            'exit':'exit'})
     
     sis = smach_ros.IntrospectionServer('mission_manager', sm_top,
                                         '/mission_manager')

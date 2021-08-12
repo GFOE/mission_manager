@@ -13,16 +13,18 @@ state sm_top {
     GOTO : Plan Dubin's path
     GOTO -up-> NEXTTASK : 'done'
     GOTO -down-> FOLLOWPATH: 'follow_path'
-    FOLLOWPATH : Action client for follower
-    FOLLOWPATH -up-> NEXTTASK : 'cancelled'
-    FOLLOWPATH -down-> LINEENDED : 'done'
     LINEENDED : Set pending_command = next_task
     LINEENDED -up-> NEXTTASK : 'next_item'
     NEXTTASK -down-> HOVER : 'hover'
     HOVER : Continues untile mode changes ore cancelled
     'HOVER -> PAUSE : 'pause'
     HOVER -up-> NEXTTASK : 'cancelled' pending_command not None
+    HOVER -> FOLLOWPATH: 'follow_path'  ??
     NEXTTASK -down-> MISSIONPLAN
+    FOLLOWPATH : Action client for follower
+    FOLLOWPATH -up-> NEXTTASK : 'cancelled'
+    FOLLOWPATH -down-> LINEENDED : 'done'
+    FOLLOWPATH -> HOVER : 'hover'
     MISSIONPLAN : TBD
     MISSIONPLAN -up-> NEXTTASK : 'done'
     MISSIONPLAN -> FOLLOWPATH : 'followpath'
