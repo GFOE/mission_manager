@@ -480,6 +480,8 @@ class MissionManagerCore(object):
           from current position (lat, lon)  to lat, lon)
         """
         p_rad = self.position()
+        if p_rad is None:
+            return None
         current_lat_rad = p_rad[0]
         current_lon_rad = p_rad[1]
         target_lat_rad = math.radians(lat)
