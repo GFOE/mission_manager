@@ -99,7 +99,7 @@ class MissionManagerCore(object):
         
         rospy.Subscriber('project11/piloting_mode', String,
                          self.pilotingModeCallback, queue_size = 1)
-        rospy.Subscriber('odom', Odometry,
+        rospy.Subscriber('project11/odom', Odometry,
                          self.odometryCallback, queue_size = 1)
         command_topic = 'project11/mission_manager/command' 
         rospy.Subscriber(command_topic, String,
