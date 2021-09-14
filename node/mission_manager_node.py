@@ -34,12 +34,16 @@ from geographic_msgs.msg import GeoPose
 from geographic_msgs.msg import GeoPoint
 from nav_msgs.msg import Odometry
 from geographic_visualization_msgs.msg import GeoVizItem, GeoVizPointList
+from geometry_msgs.msg import PoseStamped
 
 from dynamic_reconfigure.server import Server
 from mission_manager.cfg import mission_managerConfig
 
 from dubins_curves.srv import DubinsCurvesLatLong
 from dubins_curves.srv import DubinsCurvesLatLongRequest
+
+from nav_msgs.srv import GetPlan
+from nav_msgs.srv import GetPlanRequest
 
 import actionlib
 import path_follower.msg
@@ -49,6 +53,7 @@ import manda_coverage.msg
 
 import project11
 from tf.transformations import quaternion_from_euler
+from tf.transformations import quaternion_about_axis
 from tf.transformations import euler_from_quaternion
 from tf2_geometry_msgs import do_transform_pose
 import tf2_ros
@@ -120,7 +125,10 @@ class MissionManagerCore(object):
         # Dynamic reconfiguration server.
         self.config_server = Server(mission_managerConfig,
                                     self.reconfigure_callback)
-        
+
+
+        self.map_frame = rospy.get_param("~map_frame", "map")
+
         self.tfBuffer = tf2_ros.Buffer()
         self.listener = tf2_ros.TransformListener(self.tfBuffer)
 
@@ -460,7 +468,46 @@ class MissionManagerCore(object):
             o = self.odometry.pose.pose.orientation
             q = (o.x, o.y, o.z, o.w)
             return 90.0-math.degrees(euler_from_quaternion(q)[2])
-      
+
+    def geoToPose(self, lat, lon, heading, frame_id, time=rospy.Time()):
+        """ Returns a PoseStamped in given frame from given geographic position.
+        
+        TODO: This should not be a method of the object.  Should be a general
+              purpose function, probably in project11 module.  
+              Not specific to this program.
+
+        Args:
+          lat: A float, latitude, degrees
+          lon: A float, longitude, degrees
+          heading: degrees, NED.
+          frame_id: A string, target TF frame.
+
+        """
+
+        try:
+            earth_to_frame = self.tfBuffer.lookup_transform(frame_id, "earth", time)
+        except Exception as e:
+            rospy.logerr("mission_manager: Cannot lookup transform from {} to <earth>".format(frame_id))
+            rospy.logerr(e)
+            return None
+
+        ecef = project11.wgs84.toECEFfromDegrees(lat, lon)
+        ecef_pose = PoseStamped()
+        ecef_pose.pose.position.x = ecef[0]
+        ecef_pose.pose.position.y = ecef[1]
+        ecef_pose.pose.position.z = ecef[2]
+        ret = do_transform_pose(ecef_pose, earth_to_frame)
+
+        yaw = math.radians(self.headingToYaw(heading))
+        quat = quaternion_about_axis(yaw, (0,0,1))
+        ret.pose.orientation.x = quat[0]
+        ret.pose.orientation.y = quat[1]
+        ret.pose.orientation.z = quat[2]
+        ret.pose.orientation.w = quat[3]
+
+        return ret
+
+
     def distanceTo(self, lat, lon):
         """ Returns distance from current vehicle position to given location.
 
@@ -544,8 +591,8 @@ class MissionManagerCore(object):
               generateDubinsPathFromVehicle()
 
         Args:
-          targetLon: A float, Latitude - believe in radians?
-          targetLon: A float, Longitude - believe in radians?
+          targetLon: A float, Latitude - degrees
+          targetLon: A float, Longitude - degrees
           targetHeading: A float, degrees, NED
         Returns:
            An array of geographic_msgs/GeoPose objects
@@ -558,7 +605,68 @@ class MissionManagerCore(object):
         return self.generatePath(math.degrees(p[0]), math.degrees(p[1]),
                                  h, targetLat, targetLon, targetHeading)
 
+
     def generatePath(self, startLat, startLon, startHeading,
+                     targetLat, targetLon, targetHeading):
+        """ Create path from start to target.
+
+        Uses move_base's make_plan service, if avaiable, to generate a path
+        from start to target. Falls back to generateDubinsPath is the make_plan
+        service is not available.
+
+        Args:
+          startLat: Float,  Latitude - degrees
+          startLon: Float, Longitude - degrees
+          startHeading: Float, degrees, NED.
+          targetLat: Float, Latitude - degrees
+          targetLon: Float, Longitude - degrees
+          targetHeading: Float degrees, NED.
+        Returns:
+           An array of geographic_msgs/GeoPose objects
+           geographic_msgs/GeoPose[]
+        """
+
+        try:
+            rospy.wait_for_service('move_base/make_plan', timeout=0.5)
+        except rospy.ROSException as e:
+            rospy.logwarn(e)
+            rospy.logwarn("move_base/make_plan not available, falling back to Dubin's")
+            return self.generateDubinsPath(startLat, startLon, startHeading,
+                     targetLat, targetLon, targetHeading)
+
+        make_plan_service = rospy.ServiceProxy('move_base/make_plan', GetPlan)
+        
+        plan_request = GetPlanRequest()
+        plan_request.start = self.geoToPose(startLat, startLon, startHeading, self.map_frame)
+        plan_request.goal = self.geoToPose(targetLat, targetLon, targetHeading, self.map_frame)
+        
+        plan = make_plan_service(plan_request).plan
+
+        rospy.logdebug(plan)
+
+        try:
+            map_to_earth = self.tfBuffer.lookup_transform("earth", self.map_frame, rospy.Time())
+        except Exception as e:
+            rospy.logerr("mission_manager: Cannot lookup transform from <earth>"
+                         " to map_frame")
+            rospy.logerr(e)
+            return None
+
+        ret = []
+        for p in plan.poses:
+            ecef = do_transform_pose(p, map_to_earth)
+            latlon = project11.wgs84.fromECEFtoLatLong(ecef.pose.position.x, ecef.pose.position.y, ecef.pose.position.z)
+            gp = GeoPose()
+            gp.position.latitude = math.degrees(latlon[0])
+            gp.position.longitude = math.degrees(latlon[1])
+            gp.position.altitude = latlon[2]
+            gp.orientation = p.pose.orientation
+            ret.append(gp)
+        return ret
+
+
+
+    def generateDubinsPath(self, startLat, startLon, startHeading,
                      targetLat, targetLon, targetHeading):
         """ Create Dubin's curve path from start to target.
 
@@ -569,15 +677,12 @@ class MissionManagerCore(object):
               purpose function, probably in project11 module.  
               Not specific to this program.
 
-        TODO: Should be more specific name, such as 
-              generateDubinsPath()
-
         Args:
-          startLat: Float,  Latitude - believe in radians?
-          startLon: Float, Longitude - believe in radians?
+          startLat: Float,  Latitude - degrees
+          startLon: Float, Longitude - degrees
           startHeading: Float, degrees, NED.
-          targetLat: Float, Latitude - believe in radians?
-          targetLon: Float, Longitude - believe in radians?
+          targetLat: Float, Latitude - degrees
+          targetLon: Float, Longitude - degrees
           targetHeading: Float degrees, NED.
         Returns:
            An array of geographic_msgs/GeoPose objects
