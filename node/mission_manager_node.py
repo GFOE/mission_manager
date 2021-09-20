@@ -1150,22 +1150,16 @@ class Hover(MMState):
         task = self.missionManager.getCurrentTask()
         if task is not None:
             if not self.missionManager.waypointReached(task['latitude'],task['longitude']):
-                path = []
-                p = self.missionManager.position()
-                if p is None:
-                  return 'cancelled'
-                gp = GeoPose()
-                gp.position.latitude = math.degrees(p[0])
-                gp.position.longitude = math.degrees(p[1])
-                path.append(gp)
-                g = GeoPose()
-                g.position.latitude = task['latitude']
-                g.position.longitude = task['longitude']
-                path.append(g)
-                task['path'] = path
-                task['path_type'] = 'transit'
-                task['default_speed'] = self.missionManager.default_speed
-                return 'follow_path'
+
+                headingToPoint = self.missionManager.headingToPoint(
+                    task['latitude'],task['longitude'])
+                path = self.missionManager.generatePathFromVehicle(
+                    task['latitude'],task['longitude'],headingToPoint)
+                if (len(path) > 1):
+                    task['path'] = path
+                    task['path_type'] = 'transit'
+                    task['default_speed'] = self.missionManager.default_speed
+                    return 'follow_path'
             goal = hover.msg.hoverGoal()
             goal.target.latitude = task['latitude']
             goal.target.longitude = task['longitude']
