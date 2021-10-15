@@ -26,15 +26,12 @@ import smach
 import smach_ros
 
 from std_msgs.msg import String
-from geographic_msgs.msg import GeoPointStamped
 from marine_msgs.msg import Heartbeat
 from marine_msgs.msg import KeyValue
 from geographic_msgs.msg import GeoPoseStamped
 from geographic_msgs.msg import GeoPose
 from geographic_msgs.msg import GeoPoint
-from nav_msgs.msg import Odometry
 from geographic_visualization_msgs.msg import GeoVizItem, GeoVizPointList
-from geometry_msgs.msg import PoseStamped
 
 from dynamic_reconfigure.server import Server
 from mission_manager.cfg import mission_managerConfig
@@ -50,16 +47,99 @@ import path_follower.msg
 import path_planner.msg
 import hover.msg
 import manda_coverage.msg
+import move_base_msgs.msg
 
 import project11
+
 from tf.transformations import quaternion_from_euler
-from tf.transformations import quaternion_about_axis
-from tf.transformations import euler_from_quaternion
-from tf2_geometry_msgs import do_transform_pose
-import tf2_ros
 
 import json
 import math
+
+def parseLatLong(args):
+    """ Splits a string into latitude and longitude.
+
+    Splits a string in two and crates a dictionary with 
+    latitude and longitude keys and float values.
+
+    Args:
+        args: 
+        A str of two float numbers separated by whitespace.  
+    
+    Returns:
+        A dict with keys 'latitude' and 'longitude' and float values.
+    """
+    latlon = args.split()
+    if len(latlon) == 2:
+        try:
+            lat = float(latlon[0])
+            lon = float(latlon[1])
+            return {'latitude':lat, 'longitude':lon}
+        except ValueError:
+            rospy.logerr("mission_manager: Cannot convert the command "
+                            "arguments <%s> into two floats!"%args)
+            return None
+    else:
+        rospy.logerr("mission_manager: Cannot split the command "
+                        "arguments <%s> into exactly two elements!"%args)
+
+    return None
+
+def parseMission(plan, default_speed):
+    """ Create a task dict from a json description.
+    
+    Called when a "mission_plan" command is received.
+
+    TODO: The interface changed - need to check documentation.
+    
+    Args:
+        plan: A str in json format describing a mission. 
+        default_speed: A float speed in m/s.
+
+    Returns:
+        A dict describing the task dictionary for mission 
+        described by the plan json.
+    """
+    ret = []
+    speed = default_speed
+    
+    for item in plan:
+        rospy.loginfo("mission_manager: Parsing new mission item <%s>"%item)
+        if item['type'] == 'Platform':
+            speed = item['speed']*0.514444  # knots to m/s
+        if item['type'] in ('SurveyPattern', 'TrackLine', 'SurveyArea'):
+            current_item = {'type':'mission_plan',
+                'nav_objectives':[],
+                'default_speed':speed,
+                'do_transit':True,
+                'current_nav_objective_index':0
+                }
+            if item['type'] == 'SurveyPattern':
+                for c in item['children']:
+                    current_item['nav_objectives'].append(c)
+                current_item['label'] = item['label']
+            if item['type'] == 'TrackLine':
+                current_item['nav_objectives'].append(item)
+                current_item['label'] = item['label']
+            if item['type'] == 'SurveyArea':
+                for c in item['children']:
+                    if c['type'] != 'Waypoint':
+                        current_item = None
+                        break
+                if current_item is None:
+                    ret += parseMission(item['children'], speed)
+                else:
+                    current_item['nav_objectives'].append(item)
+                    current_item['label'] = item['label']
+            if current_item is not None:
+                ret.append(current_item)
+        if item['type'] == 'Group':
+            group_items = parseMission(item['children'], speed)
+            ret += group_items
+
+    return ret
+
+
 
 class MissionManagerCore(object):
     """Singleton class instantiated by main.
@@ -67,7 +147,7 @@ class MissionManagerCore(object):
     TODO: Add attribute descriptions for key public attributes.
 
     Attributes:
-        odometry: An Odometry ROS message to store vehicle state.
+        robot_nav: Object providing position and map transforms
 
     """
     def __init__(self):
@@ -79,7 +159,6 @@ class MissionManagerCore(object):
         * Starts tf2 transform listener.
         """
         self.piloting_mode = 'standby'
-        self.odometry = None
 
         """ 
         List of tasks to do, or already done.
@@ -104,8 +183,6 @@ class MissionManagerCore(object):
         
         rospy.Subscriber('project11/piloting_mode', String,
                          self.pilotingModeCallback, queue_size = 1)
-        rospy.Subscriber('project11/odom', Odometry,
-                         self.odometryCallback, queue_size = 1)
         command_topic = 'project11/mission_manager/command' 
         rospy.Subscriber(command_topic, String,
                          self.commandCallback,
@@ -127,10 +204,9 @@ class MissionManagerCore(object):
                                     self.reconfigure_callback)
 
 
-        self.map_frame = rospy.get_param("~map_frame", "map")
 
-        self.tfBuffer = tf2_ros.Buffer()
-        self.listener = tf2_ros.TransformListener(self.tfBuffer)
+        self.robot_nav = project11.nav.RobotNavigation()
+
 
     def pilotingModeCallback(self, msg):
         """ Called by ROS subscriber to hange piloting_mode string.
@@ -152,14 +228,6 @@ class MissionManagerCore(object):
             if kv.key == 'piloting_mode':
                 self.piloting_mode = kv.value
             
-    def odometryCallback(self, msg):
-        """ Stores navigation Odometry as class attribute.
-
-        Args:
-          msg: A nav_msgs/Odometry message.
-        """
-        self.odometry = msg
-        
     def reconfigure_callback(self, config, level):
         """ Changes configuration attributes dynamic reconfiguration.
 
@@ -243,11 +311,11 @@ class MissionManagerCore(object):
                 task_type = parts[0]   
                 task = None
                 if task_type == 'goto':
-                    task = self.parseLatLong(parts[1])
+                    task = parseLatLong(parts[1])
                     if task is not None:
                         task['type'] = 'goto'
                 if task_type == 'hover':
-                    task = self.parseLatLong(parts[1])
+                    task = parseLatLong(parts[1])
                     if task is not None:
                         task['type'] = 'hover'
                 if task is not None:
@@ -288,15 +356,14 @@ class MissionManagerCore(object):
             task_type = parts[0]
             task_list = []
             if task_type == 'mission_plan':
-                task_list = self.parseMission(json.loads(parts[1]), 
-                                              self.default_speed)
+                task_list = parseMission(json.loads(parts[1]), self.default_speed)
             elif task_type == 'goto':
-                task = self.parseLatLong(args)
+                task = parseLatLong(args)
                 if task is not None:
                     task['type'] = 'goto'
                     task_list.append(task)
             elif task_type == 'hover':
-                task = self.parseLatLong(args)
+                task = parseLatLong(args)
                 if task is not None:
                     task['type'] = 'hover'
                     task_list.append(task)
@@ -330,248 +397,10 @@ class MissionManagerCore(object):
         self.override_task = task
         self.pending_command = 'do_override'
         
-    def parseLatLong(self,args):
-        """ Splits a string into latitude and longitude.
-
-        Splits a string in two and crates a dictionary with 
-        latitude and longitude keys and float values.
-
-        TODO: No reason this should be a method of the object.
-              Should be a function.
-        
-        Args:
-          args: 
-            A str of two float numbers separated by whitespace.  
-        
-        Returns:
-          A dict with keys 'latitude' and 'longitude' and float values.
-        """
-        latlon = args.split()
-        if len(latlon) == 2:
-            try:
-                lat = float(latlon[0])
-                lon = float(latlon[1])
-                return {'latitude':lat, 'longitude':lon}
-            except ValueError:
-                rospy.logerr("mission_manager: Cannot convert the command "
-                             "arguments <%s> into two floats!"%args)
-                return None
-        else:
-            rospy.logerr("mission_manager: Cannot split the command "
-                         "arguments <%s> into exactly two elements!"%args)
-
-        return None
-
-    def parseMission(self, plan, default_speed):
-        """ Create a task dict from a json description.
-        
-        Called when a "mission_plan" command is received.
-
-        TODO: No reason this should be a method of the object.
-              Should be a function.
-        
-        TODO: The interface changed - need to check documentation.
-        
-        Args:
-          plan: A str in json format describing a mission. 
-          default_speed: A float speed in m/s.
-
-        Returns:
-          A dict describing the task dictionary for mission 
-          described by the plan json.
-        """
-        ret = []
-        speed = default_speed
-        
-        for item in plan:
-            rospy.loginfo("mission_manager: Parsing new mission item <%s>"%item)
-            if item['type'] == 'Platform':
-                speed = item['speed']*0.514444  # knots to m/s
-            if item['type'] in ('SurveyPattern', 'TrackLine', 'SurveyArea'):
-                current_item = {'type':'mission_plan',
-                    'nav_objectives':[],
-                    'default_speed':speed,
-                    'do_transit':True,
-                    'current_nav_objective_index':0
-                    }
-                if item['type'] == 'SurveyPattern':
-                    for c in item['children']:
-                        current_item['nav_objectives'].append(c)
-                    current_item['label'] = item['label']
-                if item['type'] == 'TrackLine':
-                    current_item['nav_objectives'].append(item)
-                    current_item['label'] = item['label']
-                if item['type'] == 'SurveyArea':
-                    for c in item['children']:
-                        if c['type'] != 'Waypoint':
-                            current_item = None
-                            break
-                    if current_item is None:
-                        ret += self.parseMission(item['children'], speed)
-                    else:
-                        current_item['nav_objectives'].append(item)
-                        current_item['label'] = item['label']
-                if current_item is not None:
-                    ret.append(current_item)
-            if item['type'] == 'Group':
-                group_items = self.parseMission(item['children'], speed)
-                ret += group_items
-
-        return ret
-
-    def position(self):
-        """ Return last known position lat/lon of the vehicle.
-
-        TODO: This should not be a method of the object.  Should be a general
-              purpose function, probably in project11 module.  
-              Not specific to this program.
-
-        Position is determined as...
-        1. Use the frame_id value in the odometry message to lookup the 
-        tf transfrom from the "earth" frame to the frame_id.  
-        2. Transform odometry.pose to ECEF frame
-        2. The wgs84.py module from project11 is used to transfrom 
-        ECEF -> lat/lon
-
-        Returns:
-          A tuple of length three with 
-          Lat/Long in radians and altitude in meters.
-        """
-        if self.odometry is None:
-            rospy.logwarn("mission_manager: There is no current odomentry, "
-                          "so can't determine position!")
-            return None
-        
-        try:
-            odom_to_earth = self.tfBuffer.lookup_transform("earth", self.odometry.header.frame_id, rospy.Time())
-        except Exception as e:
-            rospy.logerr("mission_manager: Cannot lookup transform from <earth>"
-                         " to odometry frame_id")
-            rospy.logerr(e)
-            return None
-        # Function from tf2_geoemetry_msgs
-        ecef = do_transform_pose(self.odometry.pose, odom_to_earth).pose.position
-        return project11.wgs84.fromECEFtoLatLong(ecef.x, ecef.y, ecef.z)
-
-    def heading(self):
-        """Uses current odometry message to return heading in degrees NED.
-
-        TODO: This should not be a method of the object.  Should be a general
-              purpose function, probably in project11 module.  
-              Not specific to this program.
-
-        Returns:
-          A float for heading, degrees, NED.
-        """
-        
-        if self.odometry is not None:
-            o = self.odometry.pose.pose.orientation
-            q = (o.x, o.y, o.z, o.w)
-            return 90.0-math.degrees(euler_from_quaternion(q)[2])
-
-    def geoToPose(self, lat, lon, heading, frame_id, time=rospy.Time()):
-        """ Returns a PoseStamped in given frame from given geographic position.
-        
-        TODO: This should not be a method of the object.  Should be a general
-              purpose function, probably in project11 module.  
-              Not specific to this program.
-
-        Args:
-          lat: A float, latitude, degrees
-          lon: A float, longitude, degrees
-          heading: degrees, NED.
-          frame_id: A string, target TF frame.
-
-        """
-
-        try:
-            earth_to_frame = self.tfBuffer.lookup_transform(frame_id, "earth", time)
-        except Exception as e:
-            rospy.logerr("mission_manager: Cannot lookup transform from {} to <earth>".format(frame_id))
-            rospy.logerr(e)
-            return None
-
-        ecef = project11.wgs84.toECEFfromDegrees(lat, lon)
-        ecef_pose = PoseStamped()
-        ecef_pose.pose.position.x = ecef[0]
-        ecef_pose.pose.position.y = ecef[1]
-        ecef_pose.pose.position.z = ecef[2]
-        ret = do_transform_pose(ecef_pose, earth_to_frame)
-
-        yaw = math.radians(self.headingToYaw(heading))
-        quat = quaternion_about_axis(yaw, (0,0,1))
-        ret.pose.orientation.x = quat[0]
-        ret.pose.orientation.y = quat[1]
-        ret.pose.orientation.z = quat[2]
-        ret.pose.orientation.w = quat[3]
-
-        return ret
-
-
-    def distanceTo(self, lat, lon):
-        """ Returns distance from current vehicle position to given location.
-
-        Uses position() function and lat/lon arguments to report 
-        distance in meters.
-
-        TODO: This should not be a method of the object.  Should be a general
-              purpose function, probably in project11 module.  
-              Not specific to this program.
-
-        Args:
-          lat: A float, latitude, degrees
-          lon: A float, longitude, degrees
-        
-        Returns: 
-          A float, distance in meters 
-          from current position (lat, lon)  to lat, lon)
-        """
-        p_rad = self.position()
-        if p_rad is None:
-            return None
-        current_lat_rad = p_rad[0]
-        current_lon_rad = p_rad[1]
-        target_lat_rad = math.radians(lat)
-        target_lon_rad = math.radians(lon)
-        azimuth, distance = project11.geodesic.inverse(current_lon_rad,
-                                                       current_lat_rad,
-                                                       target_lon_rad,
-                                                       target_lat_rad)
-        return distance
-
-    def headingToPoint(self,lat,lon):
-        """ Returns bearing from current vehicle position to given location.
-
-        Uses position() function output and lat/lon to report
-        bearing from current position to lat/lon.
-
-        TODO: This should not be a method of the object.  Should be a general
-              purpose function, probably in project11 module.  
-              Not specific to this program.
-
-        TODO: This should be combined wtih distanceTo - make one unifying 
-              underyling set of function calls.
-
-        TODO: Change name of headingToPoint() and/or distanceTo() functions to 
-              be consistent.
-        Args:
-          lat: A float, latitude, degrees
-          lon: A float, longitude, degrees
-        
-        Returns: 
-          A float, dbearing to target location, degrees, NED.
-        """
-        p = self.position()
-        dest_lat_rad = math.radians(lat)
-        dest_lon_rad = math.radians(lon)
-        azimuth, distance = project11.geodesic.inverse(p[1], p[0],
-                                                       dest_lon_rad,
-                                                       dest_lat_rad)
-        return math.degrees(azimuth)
     
     def waypointReached(self, lat, lon):
       """ TODO: Write Doc"""
-      d = self.distanceTo(lat, lon)
+      d = self.robot_nav.distanceBearingTo(lat, lon)[0]
       if d is None:
         return False
       return d < self.waypointThreshold
@@ -599,8 +428,8 @@ class MissionManagerCore(object):
            geographic_msgs/GeoPose[]
         """
         
-        p = self.position()
-        h = self.heading()
+        p = self.robot_nav.positionLatLon()
+        h = self.robot_nav.heading()
         #rospy.loginfo('generatePathFromVehicle',p,h)
         return self.generatePath(math.degrees(p[0]), math.degrees(p[1]),
                                  h, targetLat, targetLon, targetHeading)
@@ -629,40 +458,22 @@ class MissionManagerCore(object):
         try:
             rospy.wait_for_service('move_base/make_plan', timeout=0.5)
         except rospy.ROSException as e:
-            rospy.logwarn(e)
-            rospy.logwarn("move_base/make_plan not available, falling back to Dubin's")
+            rospy.logwarn_throttle(10, str(e) + " - move_base/make_plan not available, falling back to Dubin's")
             return self.generateDubinsPath(startLat, startLon, startHeading,
                      targetLat, targetLon, targetHeading)
 
         make_plan_service = rospy.ServiceProxy('move_base/make_plan', GetPlan)
         
         plan_request = GetPlanRequest()
-        plan_request.start = self.geoToPose(startLat, startLon, startHeading, self.map_frame)
-        plan_request.goal = self.geoToPose(targetLat, targetLon, targetHeading, self.map_frame)
+        plan_request.start = self.robot_nav.geoToPose(startLat, startLon, startHeading)
+        plan_request.goal = self.robot_nav.geoToPose(targetLat, targetLon, targetHeading)
         
         plan = make_plan_service(plan_request).plan
 
         rospy.logdebug(plan)
 
-        try:
-            map_to_earth = self.tfBuffer.lookup_transform("earth", self.map_frame, rospy.Time())
-        except Exception as e:
-            rospy.logerr("mission_manager: Cannot lookup transform from <earth>"
-                         " to map_frame")
-            rospy.logerr(e)
-            return None
+        return self.robot_nav.poseListToGeoPoseList(plan.poses)
 
-        ret = []
-        for p in plan.poses:
-            ecef = do_transform_pose(p, map_to_earth)
-            latlon = project11.wgs84.fromECEFtoLatLong(ecef.pose.position.x, ecef.pose.position.y, ecef.pose.position.z)
-            gp = GeoPose()
-            gp.position.latitude = math.degrees(latlon[0])
-            gp.position.longitude = math.degrees(latlon[1])
-            gp.position.altitude = latlon[2]
-            gp.orientation = p.pose.orientation
-            ret.append(gp)
-        return ret
 
 
 
@@ -712,7 +523,7 @@ class MissionManagerCore(object):
         dubins_req.startGeoPose.position.latitude = startLat
         dubins_req.startGeoPose.position.longitude = startLon
 
-        start_yaw = math.radians(self.headingToYaw(startHeading))
+        start_yaw = math.radians(project11.nav.headingToYaw(startHeading))
         start_quat = quaternion_from_euler(0.0,0.0,start_yaw)
         dubins_req.startGeoPose.orientation.x = start_quat[0]
         dubins_req.startGeoPose.orientation.y = start_quat[1]
@@ -722,7 +533,7 @@ class MissionManagerCore(object):
         dubins_req.targetGeoPose.position.latitude = targetLat
         dubins_req.targetGeoPose.position.longitude = targetLon
       
-        target_yaw = math.radians(self.headingToYaw(targetHeading))
+        target_yaw = math.radians(project11.nav.headingToYaw(targetHeading))
         q = quaternion_from_euler(0.0,0.0,target_yaw)
         dubins_req.targetGeoPose.orientation.x = q[0]
         dubins_req.targetGeoPose.orientation.y = q[1]
@@ -731,53 +542,15 @@ class MissionManagerCore(object):
 
         
         # Call the service
-        rospy.loginfo("mission_manager: Calling Dubins path service with "
+        rospy.logdebug("mission_manager: Calling Dubins path service with "
                       "request: %s"%str(dubins_req))
         dubins_path = dubins_service(dubins_req)
         
         # Return the service output
-        rospy.loginfo("mission_manager: Generated the following Dubins path: "
+        rospy.logdebug("mission_manager: Generated the following Dubins path: "
                       "%s"%str(dubins_path))
         return dubins_path.path
 
-    def segmentHeading(self, start_lat, start_lon, dest_lat, dest_lon):
-        """ Returns bearing of a geodesic line.
-
-        Uses python11.geodesic library to determine bearing (degrees, NED)
-        from start lat/lon to destination lat/lon.
-
-        TODO: This should not be a method of the object.  Should be a general
-              purpose function, probably in project11 module.  
-              Not specific to this program.
-
-        TODO: Write Args documentation.
-
-        Returns:
-          A float, bearing from start lat/lon to dest lat/lon, degrees, NED.
-        """
-        start_lat_rad = math.radians(start_lat)
-        start_lon_rad = math.radians(start_lon)
-
-        dest_lat_rad = math.radians(dest_lat)
-        dest_lon_rad = math.radians(dest_lon)
-        
-        path_azimuth, path_distance = project11.geodesic.inverse(
-            start_lon_rad, start_lat_rad, dest_lon_rad, dest_lat_rad)
-        return math.degrees(path_azimuth)
-
-    def headingToYaw(self, heading):
-        """ Utility to convert heading (degrees, NED) to yaw (degress, ENU).
-
-        TODO: Should not be a method of the object - should be a 
-        utility function in a separate module.
-
-        Args:
-          heading: float heading: degrees, NED
-          
-        Returns:
-          Float, yaw: degrees, ENU
-        """
-        return 90.0-heading
 
     def iterate(self, current_state):
         """ Affords query by state machine.
@@ -963,11 +736,11 @@ class MissionManagerCore(object):
         lastPosition = None
         lastHeading = None
         if self.current_task is None:
-            p = self.position()
+            p = self.robot_nav.positionLatLon()
             if p is not None:
                 lastPosition = {'latitude': math.degrees(p[0]),
                                 'longitude': math.degrees(p[1])}
-            lastHeading = self.heading()
+            lastHeading = self.robot_nav.heading()
 
         for t in self.tasks:
             tstring = t['type']
@@ -982,10 +755,10 @@ class MissionManagerCore(object):
                     if len(nav_o['waypoints']) >= 2:
                         wp1 = nav_o['waypoints'][0]
                         wp2 = nav_o['waypoints'][1]
-                        nextHeading = self.segmentHeading(wp1['latitude'],
-                                                          wp1['longitude'],
-                                                          wp2['latitude'],
-                                                          wp2['longitude'])
+                        nextHeading = project11.nav.distanceBearingDegrees(wp1['latitude'],
+                                                                           wp1['longitude'],
+                                                                           wp2['latitude'],
+                                                                           wp2['longitude'])[1]
                     elif ((len(nav_o['waypoints']) == 1) and
                           (lastPosition is not None)):
                         wp1 = nav_o['waypoints'][0]
@@ -1035,10 +808,10 @@ class MissionManagerCore(object):
                         if len(nav_o['waypoints']) >= 2:
                             wp1 = nav_o['waypoints'][-2]
                             wp2 = nav_o['waypoints'][-1]
-                            lastHeading = self.segmentHeading(wp1['latitude'],
+                            lastHeading = project11.nav.distanceBearingDegrees(wp1['latitude'],
                                                               wp1['longitude'],
                                                               wp2['latitude'],
-                                                              wp2['longitude'])
+                                                              wp2['longitude'])[1]
 
         self.display_publisher.publish(gvi)                
                     
@@ -1151,10 +924,8 @@ class Hover(MMState):
         if task is not None:
             if not self.missionManager.waypointReached(task['latitude'],task['longitude']):
 
-                headingToPoint = self.missionManager.headingToPoint(
-                    task['latitude'],task['longitude'])
-                path = self.missionManager.generatePathFromVehicle(
-                    task['latitude'],task['longitude'],headingToPoint)
+                headingToPoint = self.missionManager.robot_nav.distanceBearingTo(task['latitude'],task['longitude'])[1]
+                path = self.missionManager.generatePathFromVehicle(task['latitude'],task['longitude'],headingToPoint)
                 if (len(path) > 1):
                     task['path'] = path
                     task['path_type'] = 'transit'
@@ -1266,9 +1037,9 @@ class MissionPlan(MMState):
         if len(task['current_path']) >1:
             start_point = task['current_path'][0]
             next_point = task['current_path'][1]
-            if task['do_transit'] and self.missionManager.distanceTo(start_point.position.latitude,start_point.position.longitude) > self.missionManager.waypointThreshold and self.missionManager.planner == 'path_follower':
+            if task['do_transit'] and self.missionManager.robot_nav.distanceBearingTo(start_point.position.latitude,start_point.position.longitude)[0] > self.missionManager.waypointThreshold and self.missionManager.planner == 'path_follower':
                 #transit
-                segment_heading = self.missionManager.segmentHeading(start_point.position.latitude,start_point.position.longitude,next_point.position.latitude,next_point.position.longitude)
+                segment_heading =  project11.nav.distanceBearingDegrees(start_point.position.latitude,start_point.position.longitude,next_point.position.latitude,next_point.position.longitude)[1]
                 pre_start = project11.geodesic.direct(math.radians(start_point.position.longitude), math.radians(start_point.position.latitude), math.radians(segment_heading+180), self.missionManager.lineup_distance)
                 #print ('heading',segment_heading, 'start:', start_point.position, 'pre start:',  math.degrees(pre_start[1]), math.degrees(pre_start[0]))
                 transit_path = self.missionManager.generatePathFromVehicle(math.degrees(pre_start[1]), math.degrees(pre_start[0]), segment_heading)
@@ -1283,7 +1054,7 @@ class Goto(MMState):
 
     """
     def __init__(self, mm):
-        MMState.__init__(self, mm, outcomes=['done','follow_path'])
+        MMState.__init__(self, mm, outcomes=['done','follow_path','cancelled'])
         
     def execute(self, userdata):
         """
@@ -1298,25 +1069,21 @@ class Goto(MMState):
         attribute.  Would it be cleaner to use userdata to pass the path
         to the follower?
         """
+
+        #return self.execute_move_base(userdata)
+
         task = self.missionManager.getCurrentTask()
         if task is not None:
-            dist = self.missionManager.distanceTo(task['latitude'],
-                                                  task['longitude'])
-            if (dist <= self.missionManager.waypointThreshold):
-                rospy.loginfo("mission_manager.GOTO: Distance <%.1f> is within"
-                              " threshold <%.1f>.  Transition to NEXTASK"%
-                              (dist, self.missionManager.waypointThreshold))
+            if self.missionManager.waypointReached(task['latitude'], task['longitude']):
                 self.missionManager.pending_command = 'next_task'
                 return 'done'
-            headingToPoint = self.missionManager.headingToPoint(
-                task['latitude'],task['longitude'])
+            headingToPoint = self.missionManager.robot_nav.distanceBearingTo(task['latitude'],task['longitude'])[1]
             rospy.loginfo("mission_manager.GOTO: Generating Dubin's path.")
             path = self.missionManager.generatePathFromVehicle(
                 task['latitude'],task['longitude'],headingToPoint)
             if (len(path) < 1):
                 return 'done'
-            rospy.loginfo("mission_manager.GOTO: Generated Dubin's path: %s"%
-                          str(path))
+            rospy.loginfo("mission_manager.GOTO: Generated Dubin's path: %s"% str(path))
             task['path'] = path
             task['path_type'] = 'transit'
             task['default_speed'] = self.missionManager.default_speed
@@ -1325,7 +1092,59 @@ class Goto(MMState):
             rospy.logerr("mission_manager.GOTO: "
                           "MissionManagerCore.getCurrentTask() returns None "
                           "- so GOTO state has undefined return.")
-        
+
+    def execute_move_base(self, userdata):
+        task = self.missionManager.getCurrentTask()
+        if task is not None:
+            if not self.missionManager.waypointReached(task['latitude'],task['longitude']):
+                headingToPoint = self.missionManager.headingToPoint(
+                    task['latitude'],task['longitude'])
+                goal = move_base_msgs.msg.MoveBaseGoal()
+                goal.target_pose = self.missionManager.geoToPose(task['latitude'],task['longitude'],headingToPoint, self.missionManager.map_frame)
+                distance = self.missionManager.distanceTo(task['latitude'],task['longitude'])
+                rospy.loginfo("distance: "+str(distance))
+                rospy.loginfo("speed: "+str(self.missionManager.default_speed))
+                duration = rospy.Duration.from_sec(distance/self.missionManager.default_speed)
+                rospy.loginfo("duration: "+str(duration.to_sec()))
+                goal.target_pose.header.stamp = rospy.Time.now()+duration
+                rospy.loginfo("Goto: "+str(goal))
+                move_base_client = actionlib.SimpleActionClient('move_base', move_base_msgs.msg.MoveBaseAction)
+                self.move_base_done = False
+                to = 2.0
+                if (not move_base_client.wait_for_server(rospy.Duration(to))):
+                    rospy.logerr("mission_manager.Goto: Connection to move_base "
+                             "action server timed out after %.2f s"%to)
+                    return 'cancelled'
+                move_base_client.send_goal(goal,
+                                           done_cb = self.callbackDone,
+                                           active_cb = self.callbackActive,
+                                           feedback_cb= self.callbackFeedback)
+                while True:
+                    ret = self.missionManager.iterate('Goto')
+                    if ret is not None:
+                        move_base_client.cancel_goal()
+                        return ret
+                    if self.move_base_done:
+                        self.missionManager.pending_command = 'next_task'
+                        return 'done'
+        return 'done'
+
+                    
+
+ 
+
+    def callbackActive(self):
+        rospy.loginfo("mission_manager: goto move_base action is active.")
+
+    def callbackFeedback(self, feedback):
+        rospy.loginfo_throttle(2.0, "mission_manager: goto move_base action feedback: \n"+str(feedback))
+
+    def callbackDone(self, state, result):
+        self.move_base_done = True
+        rospy.loginfo("mission_manager: goto move_base action done: \n"
+                      "\t"+str(state)+str(result))
+
+
 class FollowPath(MMState):
     """SMACH state object.
 
@@ -1557,6 +1376,7 @@ def main():
                                                 'survey_area':'SURVEYAREA'})
             smach.StateMachine.add('GOTO',Goto(missionManager),
                                    transitions={'done':'NEXTTASK',
+                                                'cancelled':'NEXTTASK',
                                                 'follow_path':'FOLLOWPATH'})
             smach.StateMachine.add('FOLLOWPATH', FollowPath(missionManager),
                                    transitions={'pause':'pause',
