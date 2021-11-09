@@ -666,7 +666,7 @@ class MissionManagerCore(object):
                             self.current_task = self.tasks[0]
                         elif self.done_behavior == 'hover':
                             self.current_task = {'type':'hover'}
-                            position = self.position()
+                            position = self.robot_nav.positionLatLon()
                             self.current_task['latitude'] = math.degrees(position[0])
                             self.current_task['longitude'] = math.degrees(position[1])
                 if self.current_task is not None and self.current_task['type'] == 'mission_plan':
