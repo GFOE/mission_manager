@@ -57,6 +57,11 @@ class MissionManager(object):
         # A task that may be added, such as hover,
         # to temporarily interupt current tast.
         self.override_task = None
+        self.done_task = Task()
+        self.done_task.type = "hover"
+        self.done_task.id = "done_hover"
+        self.done_task.priority = 100
+
 
         self.command_subscriber = rospy.Subscriber('project11/mission_manager/command', String, self.commandCallback,
             queue_size = 1)
@@ -74,6 +79,7 @@ class MissionManager(object):
             goal.tasks.append(self.override_task)
         for t in self.tasks:
             goal.tasks.append(t)
+        goal.tasks.append(self.done_task)
         if self.navigator_client.wait_for_server(rospy.Duration(2.0)):
             rospy.loginfo("sending goal:")
             rospy.loginfo(goal)
@@ -105,10 +111,24 @@ class MissionManager(object):
             hb.values.append(kv)
 
     def navigatorFeedbackCallback(self, feedback):
+        needUpdate = False
+        if feedback is not None:
+            for updated_task in feedback.tasks:
+                if self.override_task is not None and self.override_task.id == updated_task.id:
+                    if updated_task.done:
+                        self.override_task = None
+                        needUpdate = True
+                for task in self.tasks:
+                    if task.id == updated_task.id:
+                        task.done = updated_task.done
+
         hb = Heartbeat()
         hb.values.append(KeyValue("Navigator","active"))
         self.listTasks(feedback, hb)
         self.status_publisher.publish(hb)
+
+        if needUpdate:
+            self.updateNavigator()
 
     def navigatorDoneCallback(self, state, result):
         hb = Heartbeat()
