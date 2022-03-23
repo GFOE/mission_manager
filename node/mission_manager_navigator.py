@@ -174,7 +174,7 @@ class MissionManager(object):
                 task_type = parts[0]   
                 if task_type == 'goto':
                     task = Task()
-                    task.type = "transit"
+                    task.type = "goto"
                     task.id = "goto_override"
                     task.priority = -1
                     ll = parseLatLong(parts[1])
@@ -307,7 +307,7 @@ class MissionManager(object):
             elif item['type'] == 'Waypoint' and not ignore_waypoints:
                 task = self.newTaskWithID(item, parent_id, 'waypoint_'+str(len(ret)))
                 task.poses.append(self.earth.geoToPose(item['latitude'], item['longitude']))
-                task.type = "transit"
+                task.type = "goto"
 
             elif item['type'] == 'SurveyPattern':
                 task = self.newTaskWithID(item, parent_id, 'area_'+str(len(ret)))
