@@ -309,7 +309,7 @@ class MissionManager(object):
                 task.poses.append(self.earth.geoToPose(item['latitude'], item['longitude']))
                 task.type = "goto"
 
-            elif item['type'] == 'SurveyPattern':
+            elif item['type'] == 'SurveyPattern' or item['type'] == 'SearchPattern':
                 task = self.newTaskWithID(item, parent_id, 'area_'+str(len(ret)))
                 task.type = "survey_area"
                 ret.append(task)
