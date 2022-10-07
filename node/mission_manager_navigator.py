@@ -6,7 +6,7 @@ from std_msgs.msg import String
 from marine_msgs.msg import Heartbeat
 from marine_msgs.msg import KeyValue
 from project11_nav_msgs.msg import Task
-
+from geometry_msgs.msg import PoseStamped
 import project11
 
 import actionlib
@@ -336,6 +336,19 @@ class MissionManager(object):
                 task.type = "group"
                 group_items = self.parseMission(item['children'], parent_id+task.id+"/")
                 ret += group_items
+            
+            if item['type'] == 'Orbit':
+                task = self.newTaskWithID(item, parent_id, 'orbit_'+str(len(ret)))
+                task.type = "orbit"
+                data = {'speed':item['speed'], 'radius':item['radius'], 'safety_distance':item['safetyDistance']}
+                task.data = json.dumps(data)
+                if len(item['targetFrame']):
+                    target = PoseStamped()
+                    target.pose.orientation.w = 1.0
+                    target.header.frame_id = item['targetFrame']
+                    task.poses.append(target)
+                ret.append(task)
+
 
         return ret
     
