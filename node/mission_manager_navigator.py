@@ -3,8 +3,8 @@
 import rospy
 
 from std_msgs.msg import String
-from marine_msgs.msg import Heartbeat
-from marine_msgs.msg import KeyValue
+from project11_msgs.msg import Heartbeat
+from project11_msgs.msg import KeyValue
 from project11_nav_msgs.msg import Task
 from geometry_msgs.msg import PoseStamped
 import project11

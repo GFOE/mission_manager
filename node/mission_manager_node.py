@@ -26,8 +26,8 @@ import smach
 import smach_ros
 
 from std_msgs.msg import String
-from marine_msgs.msg import Heartbeat
-from marine_msgs.msg import KeyValue
+from project11_msgs.msg import Heartbeat
+from project11_msgs.msg import KeyValue
 from geographic_msgs.msg import GeoPoseStamped
 from geographic_msgs.msg import GeoPose
 from geographic_msgs.msg import GeoPoint
@@ -222,7 +222,7 @@ class MissionManagerCore(object):
         Note that this can also be done throught he pilotingModeCallback.
 
         Args: 
-          msg: A marine_msgs/Heartbeat message.
+          msg: A project11_msgs/Heartbeat message.
         """
         for kv in msg.values:
             if kv.key == 'piloting_mode':

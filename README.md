@@ -53,7 +53,7 @@ Publications:
  * /path_planner_action/cancel [actionlib_msgs/GoalID]
  * /path_planner_action/goal [path_planner/path_plannerActionGoal]
      * path_plannier.action.goal : geographic_msgs/GeoPath path
- * /project11/status/mission_manager [marine_msgs/Heartbeat]
+ * /project11/status/mission_manager [project11_msgs/Heartbeat]
  * /rosout [rosgraph_msgs/Log]
  * /survey_area_action/cancel [actionlib_msgs/GoalID]
  * /survey_area_action/goal [manda_coverage/manda_coverageActionGoal]
