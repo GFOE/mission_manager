@@ -10,7 +10,6 @@ find_package(catkin REQUIRED COMPONENTS
   message_generation
   dynamic_reconfigure
   path_follower
-  alex_path_planner
 )
 
 catkin_python_setup()
