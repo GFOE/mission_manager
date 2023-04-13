@@ -254,6 +254,8 @@ class MissionManager(object):
             task.id = parent_id+item['label']
         else:
             task.id = parent_id+id
+        if 'speed' in item:
+            task.data = json.dumps({'speed': item['speed']*0.514444})  # knots to m/s
         return task
 
 
