@@ -5,7 +5,7 @@ import rospy
 from std_msgs.msg import String
 from project11_msgs.msg import Heartbeat
 from project11_msgs.msg import KeyValue
-from project11_nav_msgs.msg import Task
+from project11_nav_msgs.msg import TaskInformation
 from geometry_msgs.msg import PoseStamped
 import project11
 
@@ -57,7 +57,7 @@ class MissionManager(object):
         # A task that may be added, such as hover,
         # to temporarily interupt current tast.
         self.override_task = None
-        self.done_task = Task()
+        self.done_task = TaskInformation()
         self.done_task.type = "hover"
         self.done_task.id = "done_hover"
         self.done_task.priority = 100
@@ -173,7 +173,7 @@ class MissionManager(object):
             if len(parts) == 2:
                 task_type = parts[0]   
                 if task_type == 'goto':
-                    task = Task()
+                    task = TaskInformation()
                     task.type = "goto"
                     task.id = "goto_override"
                     task.priority = -1
@@ -182,7 +182,7 @@ class MissionManager(object):
                         task.poses.append(self.earth.geoToPose(ll['latitude'], ll['longitude']))
                         self.override_task = task
                 elif task_type == 'hover':
-                    task = Task()
+                    task = TaskInformation()
                     task.type = "hover"
                     task.id = "hover_override"
                     task.priority = -1
@@ -249,7 +249,7 @@ class MissionManager(object):
         rospy.loginfo('mission_manager: tasks : %s'%str(self.tasks))
 
     def newTaskWithID(self, item, parent_id='', id='task'):
-        task = Task()
+        task = TaskInformation()
         if 'label' in item:
             task.id = parent_id+item['label']
         else:
