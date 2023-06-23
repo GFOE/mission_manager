@@ -124,6 +124,8 @@ class MissionManager(object):
 
         hb = Heartbeat()
         hb.values.append(KeyValue("Navigator","active"))
+        if feedback is not None:
+            hb.values.append(KeyValue("Current Nav Task", feedback.current_nav_task))
         self.listTasks(feedback, hb)
         self.status_publisher.publish(hb)
 
