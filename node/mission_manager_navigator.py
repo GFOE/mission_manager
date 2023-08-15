@@ -55,7 +55,7 @@ class MissionManager(object):
         """
         self.tasks = []
         # A task that may be added, such as hover,
-        # to temporarily interupt current tast.
+        # to temporarily interrupt current task.
         self.override_task = None
         self.done_task = TaskInformation()
         self.done_task.type = "hover"
