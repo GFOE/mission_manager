@@ -279,10 +279,13 @@ class MissionManager(object):
             task.poses.append(self.earth.geoToPose(wp['latitude'], wp['longitude'], heading))
         return task
 
-    def parseTackline(self, item, parent_id, id='line'):
+    def parseTrackLine(self, item, parent_id, id='line'):
         task = self.newTaskWithID(item, parent_id, id)
         task.type = "survey_line"
-        self.parseWaypoints(item['waypoints'], task)
+        try:
+            self.parseWaypoints(item['children'], task)
+        except KeyError:
+            rospy.logwarn('"children" not found in ', item)
         return task
 
 
@@ -319,12 +322,13 @@ class MissionManager(object):
                 ret.append(task)
                 line_count = 1
                 for c in item['children']:
-                    sub_task = self.parseTackline(c, parent_id + task.id + '/', 'line_' + str(line_count))
-                    line_count += 1
-                    ret.append(sub_task)
+                    if c['type'] == 'TrackLine':
+                        sub_task = self.parseTrackLine(c, parent_id + task.id + '/', 'line_' + str(line_count))
+                        line_count += 1
+                        ret.append(sub_task)
 
             elif item['type'] == 'TrackLine':
-                ret.append(self.parseTackline(item, parent_id, 'line_'+str(len(ret))))
+                ret.append(self.parseTrackLine(item, parent_id, 'line_'+str(len(ret))))
 
             elif item['type'] == 'SurveyArea':
                 task = self.newTaskWithID(item, parent_id, 'area_'+str(len(ret)))
