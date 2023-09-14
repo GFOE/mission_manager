@@ -146,7 +146,7 @@ class MissionManager(object):
         Args:
           msg: 
             A std_msg/String message.
-            Formated string, delimited by whitespace, describing task_type 
+            Formatted string, delimited by whitespace, describing task_type 
             and task parameters.
         """
         
@@ -172,6 +172,8 @@ class MissionManager(object):
                 self.override_task = None
             # TODO, manipulate task status in response to commands
             #self.pending_command  = msg.data
+        elif cmd == 'cancel_override':
+            self.override_task = None
         elif cmd == 'override':
             parts = args.split(None,1)
             if len(parts) == 2:
@@ -193,6 +195,12 @@ class MissionManager(object):
                     ll = parseLatLong(parts[1])
                     if ll is not None:
                         task.poses.append(self.earth.geoToPose(ll['latitude'], ll['longitude']))
+                    self.override_task = task
+                elif task_type == 'idle':
+                    task = TaskInformation()
+                    task.type = "idle"
+                    task.id = "idle_override"
+                    task.priority = -1
                     self.override_task = task
         else:
             rospy.logerr("mission_manager: No defined action for the "
