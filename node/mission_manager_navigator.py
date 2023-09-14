@@ -5,6 +5,7 @@ import rospy
 from std_msgs.msg import String
 from project11_msgs.msg import Heartbeat
 from project11_msgs.msg import KeyValue
+from project11_msgs.msg import BehaviorInformation
 from project11_nav_msgs.msg import TaskInformation
 from geometry_msgs.msg import PoseStamped
 import project11
@@ -221,7 +222,10 @@ class MissionManager(object):
             task_type = parts[0]
             task_list = []
             if task_type == 'mission_plan':
-                task_list = self.parseMission(json.loads(parts[1]))
+                tasks_and_behaviors = self.parseMission(json.loads(parts[1]))
+                task_list = tasks_and_behaviors['tasks']
+                if len(tasks_and_behaviors['behaviors']) > 0:
+                    rospy.logerr("mission_manager: top level behaviors not yet supported")
             # elif task_type == 'goto':
             #     task = parseLatLong(args)
             #     if task is not None:
@@ -259,6 +263,11 @@ class MissionManager(object):
             task.id = parent_id+id
         if 'speed' in item:
             task.data = yaml.safe_dump({'speed': item['speed']*0.514444})  # knots to m/s
+        if 'children' in item:
+            for sub_item in item['children']:
+                if sub_item['type'] == 'Behavior':
+                    task.behaviors.append(self.parseBehavior(sub_item))
+
         return task
 
 
@@ -290,6 +299,15 @@ class MissionManager(object):
             rospy.logwarn('"children" not found in ', item)
         return task
     
+    def parseBehavior(self, item):
+        '''Parse a single behavior mission item'''
+        behavior = BehaviorInformation()
+        behavior.type = item['behaviorType']
+        behavior.enabled = item['active']
+        behavior.data = item['data']
+        return behavior
+
+
     def parseBehaviors(self, item, task):
         '''Parse mission element behaviors into YAML for addition to the 
         TaskInformation.msg.
@@ -310,8 +328,8 @@ class MissionManager(object):
         
         # Strategy:
         # In the event that there is already task data, we don't want to over
-        # write it. But you can't concatinate YAML, so we load what's already there 
-        # as a python dictionary, concatinate the old with the new, convert back
+        # write it. But you can't concatenate YAML, so we load what's already there 
+        # as a python dictionary, concatenate the old with the new, convert back
         # to YAML, and then set the task.data to the combined. 
         datatmp = {}
         if task.data != '':
@@ -330,7 +348,7 @@ class MissionManager(object):
             
         return 
 
-    def parseMission(self, plan, parent_id='', ignore_waypoints = False):
+    def parseMission(self, plan, parent_id='', ignore_list = []):
         """ Create a task dict from a json description.
         
         Called when a "mission_plan" command is received.
@@ -344,50 +362,47 @@ class MissionManager(object):
             A dict describing the task dictionary for mission 
             described by the plan json.
         """
-        ret = []
-        speed = None
+        ret = {'tasks':[], 'behaviors':[]}
         
         for item in plan:
             rospy.loginfo("mission_manager: Parsing new mission item <%s>"%item)
-            if item['type'] == 'Platform':
-                speed = item['speed']*0.514444  # knots to m/s
 
-            elif item['type'] == 'Waypoint' and not ignore_waypoints:
+            if item['type'] == 'Waypoint' and not 'Waypoint' in ignore_list:
                 task = self.newTaskWithID(item, parent_id, 'waypoint_'+str(len(ret)))
                 task.poses.append(self.earth.geoToPose(item['latitude'], item['longitude']))
                 task.type = "goto"
 
             elif item['type'] == 'SurveyPattern' or item['type'] == 'SearchPattern':
-                task = self.newTaskWithID(item, parent_id, 'area_'+str(len(ret)))
+                task = self.newTaskWithID(item, parent_id, 'area_'+str(len(ret['tasks'])))
                 task.type = "survey_area"
-                ret.append(task)
+                ret['tasks'].append(task)
                 line_count = 1
                 for c in item['children']:
                     if c['type'] == 'TrackLine':
                         sub_task = self.parseTrackLine(c, parent_id + task.id + '/', 'line_' + str(line_count))
                         line_count += 1
-                        ret.append(sub_task)
+                        ret['tasks'].append(sub_task)
 
             elif item['type'] == 'TrackLine':
-                ret.append(self.parseTrackLine(item, parent_id, 'line_'+str(len(ret))))
+                ret['tasks'].append(self.parseTrackLine(item, parent_id, 'line_'+str(len(ret['tasks']))))
 
             elif item['type'] == 'SurveyArea':
-                task = self.newTaskWithID(item, parent_id, 'area_'+str(len(ret)))
+                task = self.newTaskWithID(item, parent_id, 'area_'+str(len(ret['tasks'])))
                 task.type = "survey_area"
                 self.parseWaypoints(item['children'], task)
-                ret.append(task)
+                ret['tasks'].append(task)
 
-                sub_tasks = self.parseMission(item['children'], parent_id+task.id+'/', True)
-                ret += sub_tasks
+                sub_tasks = self.parseMission(item['children'], parent_id+task.id+'/', ['Waypoint', 'Behavior'])
+                ret['tasks'] += sub_tasks['tasks']
 
             if item['type'] == 'Group':
-                task = self.newTaskWithID(item, parent_id, 'group_'+str(len(ret)))
+                task = self.newTaskWithID(item, parent_id, 'group_'+str(len(ret['tasks'])))
                 task.type = "group"
-                group_items = self.parseMission(item['children'], parent_id+task.id+"/")
-                ret += group_items
+                group_items = self.parseMission(item['children'], parent_id+task.id+"/", ['Behavior'])
+                ret['tasks'] += group_items['tasks']
             
             if item['type'] == 'Orbit':
-                task = self.newTaskWithID(item, parent_id, 'orbit_'+str(len(ret)))
+                task = self.newTaskWithID(item, parent_id, 'orbit_'+str(len(ret['tasks'])))
                 task.type = "orbit"
                 data = {'speed':item['speed'], 'radius':item['radius'], 'safety_distance':item['safetyDistance']}
                 task.data = yaml.safe_dumps(data)
@@ -396,7 +411,11 @@ class MissionManager(object):
                     target.pose.orientation.w = 1.0
                     target.header.frame_id = item['targetFrame']
                     task.poses.append(target)
-                ret.append(task)
+                ret['tasks'].append(task)
+
+            if item['type'] == 'Behavior' and not 'Behavior' in ignore_list:
+                ret['behaviors'].append(self.parseBehavior(item))
+
 
 
         return ret
