@@ -1,0 +1,9 @@
+# Behavior Data - key-value pairs in YAML
+string      taskid
+string      data
+---
+# Result
+uint32      result
+---
+# Feedback message
+string      feedback

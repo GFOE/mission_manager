@@ -11,7 +11,7 @@ import project11
 
 import actionlib
 import project11_navigation.msg
-
+from project11_msgs.msg import BehaviorInformation
 import json
 import yaml
 
@@ -63,15 +63,26 @@ class MissionManager(object):
         self.done_task.id = "done_hover"
         self.done_task.priority = 100
 
+        # A dictionary of behaviors, keyed on task.id.
+        self.behaviors_library = {}
+        self.active_behaviors = []
 
-        self.command_subscriber = rospy.Subscriber('project11/mission_manager/command', String, self.commandCallback,
-            queue_size = 1)
+        self.command_subscriber = rospy.Subscriber('project11/mission_manager/command', 
+                                                   String, self.commandCallback,
+                                                    queue_size = 1)
 
-        self.status_publisher = rospy.Publisher('project11/status/mission_manager', Heartbeat, queue_size = 10)
+        self.status_publisher = rospy.Publisher('project11/status/mission_manager', 
+                                                Heartbeat, queue_size = 10)
 
         self.earth = project11.nav.EarthTransforms()
 
-        self.navigator_client = actionlib.SimpleActionClient('navigator/run_tasks', project11_navigation.msg.RunTasksAction)
+        self.navigator_client = actionlib.SimpleActionClient('navigator/run_tasks', 
+                                                             project11_navigation.msg.RunTasksAction)
+        # A place to hold the running behavior information publishers.
+        self.behavior_library = {}
+        self.behavior_info_publishers = {}
+        self.behavior_feedback_subscribers = {}
+
         self.updateNavigator()
 
     def updateNavigator(self):
@@ -79,7 +90,34 @@ class MissionManager(object):
         if(self.override_task is not None):
             goal.tasks.append(self.override_task)
         for t in self.tasks:
+
+            # Populate the library with the behaviors for this task.
+            self.behavior_library[t.id] = t.behaviors
+
+            for bhv in t.behaviors:
+                # Don't make new pub/sub's if they already exist.
+                if bhv.id not in self.behavior_info_publishers.keys():
+                    # Create behavior publisher and subscriber
+                    self.behavior_info_publishers[bhv.id] = rospy.Publisher('project11/behaviors/' +
+                                                                        bhv.type + 
+                                                                        '/input',
+                                                                        BehaviorInformation,
+                                                                        queue_size=10,
+                                                                        latch=True)
+            
+                    self.behavior_feedback_subscribers[bhv.id] = rospy.Subscriber('project11/behaviors/' +
+                                                                        bhv.type +
+                                                                        '/feedback',
+                                                                        BehaviorInformation,
+                                                                        queue_size=1)
+                print("publishing behavior: %s" % bhv.id)
+                self.behavior_info_publishers[bhv.id].publish(bhv)
+
+            # Send the behavior info here for each? or Wait until feedback from the navigator?
+            
+
             goal.tasks.append(t)
+
         goal.tasks.append(self.done_task)
         if self.navigator_client.wait_for_server(rospy.Duration(2.0)):
             rospy.loginfo("sending goal:")
@@ -123,6 +161,20 @@ class MissionManager(object):
                     if task.id == updated_task.id:
                         task.done = updated_task.done
 
+        print(feedback.current_nav_task)
+
+        # Activate behaviors for each task:
+        if feedback is not None:
+            if feedback.current_nav_task in self.behavior_library.keys():
+                # Loop through each behavior and activate/update them.
+                for bhv in self.behavior_library[feedback.current_nav_task]:
+                    print("publishing behavior %s" % bhv.id)
+                    print(bhv)
+                    self.behavior_info_publishers[bhv.id].publish(bhv)
+        else:
+            rospy.logwarn('Did not activate behaviors. Timeout waiting for navigator feedback')
+
+
         hb = Heartbeat()
         hb.values.append(KeyValue("Navigator","active"))
         if feedback is not None:
@@ -138,6 +190,13 @@ class MissionManager(object):
         hb.values.append(KeyValue("Navigator","done"))
         self.listTasks(result, hb)
         self.status_publisher.publish(hb)
+
+    
+    def behaviorFeedbackCallback(self,feedback):
+        rospy.loginfo(feedback)
+        pass
+
+        
 
     def commandCallback(self, msg):
         """ Receives ROS command String.
@@ -305,6 +364,7 @@ class MissionManager(object):
             
         '''
 
+
         if 'behaviors' not in item.keys():
             return
         
@@ -313,19 +373,24 @@ class MissionManager(object):
         # write it. But you can't concatinate YAML, so we load what's already there 
         # as a python dictionary, concatinate the old with the new, convert back
         # to YAML, and then set the task.data to the combined. 
-        datatmp = {}
-        if task.data != '':
-            datatmp = yaml.safe_load(task.data)
+        for bhv in item['behaviors']:
+            B = BehaviorInformation()
+            datatmp = {}
+            for k,v in bhv.items():
+                if k == 'id':     
+                   B.id = bhv['id']
+                elif k == 'type':
+                    B.type = bhv['type']
+                elif k == 'enabled':
+                    B.enabled = bhv['enabled'].lower() == 'true'
+                else:
+                    # Capture any other key:value pairs for the data block.
+                    datatmp[k] = v
+            B.data = yaml.safe_dump(datatmp)
+            task.behaviors.append(B)
 
-        behaviortmp = {"behaviors":item['behaviors']}
-        print(behaviortmp)
-        # This method of merging will have the effect of replacing any fields
-        # that already exist in the data block with new ones specified in the 
-        # new behavior data, when they have the same keys.  
-        mergeddata = {**datatmp, **behaviortmp}
-        task.data = yaml.safe_dump(mergeddata)
-        rospy.loginfo("parsed behavior fields in task %s,\"%s\":\n %s" %
-                      (item['type'],item['label'],task.data))
+            rospy.loginfo("parsed behavior fields in task %s:\n %s" %
+                      (task.id,task.behaviors[-1]))
 
             
         return 
@@ -375,6 +440,7 @@ class MissionManager(object):
                 task = self.newTaskWithID(item, parent_id, 'area_'+str(len(ret)))
                 task.type = "survey_area"
                 self.parseWaypoints(item['children'], task)
+                self.parseBehaviors(item,task)
                 ret.append(task)
 
                 sub_tasks = self.parseMission(item['children'], parent_id+task.id+'/', True)
