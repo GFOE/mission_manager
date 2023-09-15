@@ -175,6 +175,7 @@ class MissionManager(object):
         elif cmd == 'cancel_override':
             self.override_task = None
         elif cmd == 'override':
+            rospy.loginfo(args)
             parts = args.split(None,1)
             if len(parts) == 2:
                 task_type = parts[0]   
@@ -196,12 +197,12 @@ class MissionManager(object):
                     if ll is not None:
                         task.poses.append(self.earth.geoToPose(ll['latitude'], ll['longitude']))
                     self.override_task = task
-                elif task_type == 'idle':
-                    task = TaskInformation()
-                    task.type = "idle"
-                    task.id = "idle_override"
-                    task.priority = -1
-                    self.override_task = task
+            if parts[0] == 'idle':
+                task = TaskInformation()
+                task.type = "idle"
+                task.id = "idle_override"
+                task.priority = -1
+                self.override_task = task
         else:
             rospy.logerr("mission_manager: No defined action for the "
                          "received command <%s> - ignoring!"%msg.data)
