@@ -197,8 +197,6 @@ class MissionManager(object):
         rospy.loginfo(feedback)
         pass
 
-        
-
     def commandCallback(self, msg):
         """ Receives ROS command String.
 
@@ -361,7 +359,12 @@ class MissionManager(object):
         task.type = "survey_line"
         try:
             self.parseWaypoints(item['children'], task)
-            self.parseBehaviors(item,task)
+            for sub_item in item['children']:
+                print("SUBITEM")
+                print(sub_item)
+                if sub_item['type'] == 'Behavior':
+                    task.behaviors.append(self.parseBehavior(sub_item))
+            #self.parseBehaviors(item,task)
         except KeyError:
             rospy.logwarn('"children" not found in ', item)
         return task
@@ -369,9 +372,13 @@ class MissionManager(object):
     def parseBehavior(self, item):
         '''Parse a single behavior mission item'''
         behavior = BehaviorInformation()
+        try:
+            behavior.id = item['id']
+        except:
+            behavior.id = item['behaviorType']
         behavior.type = item['behaviorType']
-        behavior.enabled = item['active']
-        behavior.data = item['data']
+        behavior.enabled = item['enabled'].lower()=='true'
+        behavior.data = yaml.safe_dump(item['data'])
         return behavior
 
 
