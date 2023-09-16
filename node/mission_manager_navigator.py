@@ -111,7 +111,7 @@ class MissionManager(object):
                                                                         '/feedback',
                                                                         BehaviorInformation,
                                                                         queue_size=1)
-                print("publishing behavior: %s" % bhv.id)
+                print("publishing behavior: %s" % bhv)
                 self.behavior_info_publishers[bhv.id].publish(bhv)
 
             # Send the behavior info here for each? or Wait until feedback from the navigator?
@@ -121,7 +121,7 @@ class MissionManager(object):
 
         goal.tasks.append(self.done_task)
         if self.navigator_client.wait_for_server(rospy.Duration(2.0)):
-            rospy.loginfo("sending goal:")
+            rospy.loginfo("mission_manager: sending goal:")
             rospy.loginfo(goal)
             self.navigator_client.send_goal(goal,
                                             active_cb = self.navigatorActiveCallback,
@@ -151,6 +151,8 @@ class MissionManager(object):
             hb.values.append(kv)
 
     def navigatorFeedbackCallback(self, feedback):
+
+        # This block needs a comment to exlain what's going on here.
         needUpdate = False
         if feedback is not None:
             for updated_task in feedback.tasks:
@@ -222,6 +224,7 @@ class MissionManager(object):
         elif cmd == 'prepend_task':
             self.addTask(args, True)
         elif cmd == 'clear_tasks':
+            rospy.loginfo('mission_manager: clear navigation tasks.')
             self.tasks = []
         elif cmd in ('next_task','prev_task','goto_task',
                    'goto_line', 'start_line', 'restart_mission'):
@@ -245,6 +248,7 @@ class MissionManager(object):
                         task.poses.append(self.earth.geoToPose(ll['latitude'], ll['longitude']))
                         self.override_task = task
                 elif task_type == 'hover':
+                    rospy.loginfo('mission_manager: hover.')
                     task = TaskInformation()
                     task.type = "hover"
                     task.id = "hover_override"
