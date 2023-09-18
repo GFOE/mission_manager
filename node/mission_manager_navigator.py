@@ -151,14 +151,17 @@ class MissionManager(object):
 
     def navigatorFeedbackCallback(self, feedback):
 
-        # This block needs a comment to exlain what's going on here.
+        # This block updates our local list of tasks with the status from the navigator.
         needUpdate = False
         if feedback is not None:
             for updated_task in feedback.tasks:
+                # If it is an override task (which won't be in our task list...)
                 if self.override_task is not None and self.override_task.id == updated_task.id:
+                    # If the task in the list returned is done, update our local task list.
                     if updated_task.done:
                         self.override_task = None
                         needUpdate = True
+                # Otherwise just mark the task to reflect the state from the navigator.
                 for task in self.tasks:
                     if task.id == updated_task.id:
                         task.done = updated_task.done
@@ -167,6 +170,7 @@ class MissionManager(object):
 
         # Activate behaviors for each task:
         if feedback is not None:
+            # TODO: Verify that the task and its children activate the task. 
             if feedback.current_nav_task in self.behavior_library.keys():
                 # Loop through each behavior and activate/update them.
                 for bhv in self.behavior_library[feedback.current_nav_task]:
