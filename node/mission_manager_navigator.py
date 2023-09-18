@@ -363,12 +363,6 @@ class MissionManager(object):
         task.type = "survey_line"
         try:
             self.parseWaypoints(item['children'], task)
-            for sub_item in item['children']:
-                print("SUBITEM")
-                print(sub_item)
-                if sub_item['type'] == 'Behavior':
-                    task.behaviors.append(self.parseBehavior(sub_item))
-            #self.parseBehaviors(item,task)
         except KeyError:
             rospy.logwarn('"children" not found in ', item)
         return task
@@ -384,47 +378,6 @@ class MissionManager(object):
         behavior.enabled = item['enabled']
         behavior.data = yaml.safe_dump(item['data'])
         return behavior
-
-
-    def parseBehaviors(self, item, task):
-        '''Parse mission element behaviors into YAML for addition to the 
-        TaskInformation.msg.
-        
-        Args:
-            plan: A string in JSON format describing a mission, usually sent 
-            from a mission planner to the mission manager. When this mission
-            contains a 'behaviors' list, they are parsed into yaml format by
-            this method.
-
-        Returns:
-            A yaml formatted string containing the behavior elements.
-            
-        '''
-
-        if 'behaviors' not in item.keys():
-            return
-        
-        # Strategy:
-        # In the event that there is already task data, we don't want to over
-        # write it. But you can't concatenate YAML, so we load what's already there 
-        # as a python dictionary, concatenate the old with the new, convert back
-        # to YAML, and then set the task.data to the combined. 
-        datatmp = {}
-        if task.data != '':
-            datatmp = yaml.safe_load(task.data)
-
-        behaviortmp = {"behaviors":item['behaviors']}
-        print(behaviortmp)
-        # This method of merging will have the effect of replacing any fields
-        # that already exist in the data block with new ones specified in the 
-        # new behavior data, when they have the same keys.  
-        mergeddata = {**datatmp, **behaviortmp}
-        task.data = yaml.dump(mergeddata)
-        rospy.loginfo("parsed behavior fields in task %s,\"%s\":\n %s" %
-                      (item['type'],item['label'],task.data))
-
-            
-        return 
 
     def parseMission(self, plan, parent_id='', ignore_list = []):
         """ Create a task dict from a json description.
