@@ -380,7 +380,7 @@ class MissionManager(object):
         except:
             behavior.id = item['behaviorType']
         behavior.type = item['behaviorType']
-        behavior.enabled = item['enabled'].lower()=='true'
+        behavior.enabled = item['enabled']
         behavior.data = yaml.safe_dump(item['data'])
         return behavior
 
