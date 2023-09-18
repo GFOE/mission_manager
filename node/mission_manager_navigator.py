@@ -12,7 +12,6 @@ import project11
 
 import actionlib
 import project11_navigation.msg
-from project11_msgs.msg import BehaviorInformation
 import json
 import yaml
 
@@ -377,7 +376,7 @@ class MissionManager(object):
         '''Parse a single behavior mission item'''
         behavior = BehaviorInformation()
         try:
-            behavior.id = item['id']
+            behavior.id = item['label']
         except:
             behavior.id = item['behaviorType']
         behavior.type = item['behaviorType']
