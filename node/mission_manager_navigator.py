@@ -426,6 +426,15 @@ class MissionManager(object):
                 sub_tasks = self.parseMission(item['children'], parent_id+task.id+'/', ['Waypoint', 'Behavior'])
                 ret['tasks'] += sub_tasks['tasks']
 
+                # if we have behaviors, add an idle subtask to we don't take off
+                # before the behavior has a chance to send subtasks
+                if len(task.behaviors):
+                    idle_task = TaskInformation()
+                    idle_task.type = "idle"
+                    idle_task.id = task.id+"/behavior_idle"
+                    idle_task.priority = 99
+                    ret['tasks'].append(idle_task)
+
             if item['type'] == 'Group':
                 task = self.newTaskWithID(item, parent_id, 'group_'+str(len(ret['tasks'])))
                 task.type = "group"
