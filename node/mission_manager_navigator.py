@@ -238,6 +238,7 @@ class MissionManager(object):
         elif cmd == 'cancel_override':
             self.override_task = None
         elif cmd == 'override':
+            rospy.loginfo(args)
             parts = args.split(None,1)
             if len(parts) == 2:
                 task_type = parts[0]   
@@ -260,12 +261,12 @@ class MissionManager(object):
                     if ll is not None:
                         task.poses.append(self.earth.geoToPose(ll['latitude'], ll['longitude']))
                     self.override_task = task
-                elif task_type == 'idle':
-                    task = TaskInformation()
-                    task.type = "idle"
-                    task.id = "idle_override"
-                    task.priority = -1
-                    self.override_task = task
+            if parts[0] == 'idle':
+                task = TaskInformation()
+                task.type = "idle"
+                task.id = "idle_override"
+                task.priority = -1
+                self.override_task = task
         else:
             rospy.logerr("mission_manager: No defined action for the "
                          "received command <%s> - ignoring!"%msg.data)
@@ -366,12 +367,6 @@ class MissionManager(object):
         task.type = "survey_line"
         try:
             self.parseWaypoints(item['children'], task)
-            for sub_item in item['children']:
-                print("SUBITEM")
-                print(sub_item)
-                if sub_item['type'] == 'Behavior':
-                    task.behaviors.append(self.parseBehavior(sub_item))
-            #self.parseBehaviors(item,task)
         except KeyError:
             rospy.logwarn('"children" not found in ', item)
         return task
@@ -387,47 +382,6 @@ class MissionManager(object):
         behavior.enabled = item['enabled']
         behavior.data = yaml.safe_dump(item['data'])
         return behavior
-
-
-    def parseBehaviors(self, item, task):
-        '''Parse mission element behaviors into YAML for addition to the 
-        TaskInformation.msg.
-        
-        Args:
-            plan: A string in JSON format describing a mission, usually sent 
-            from a mission planner to the mission manager. When this mission
-            contains a 'behaviors' list, they are parsed into yaml format by
-            this method.
-
-        Returns:
-            A yaml formatted string containing the behavior elements.
-            
-        '''
-
-        if 'behaviors' not in item.keys():
-            return
-        
-        # Strategy:
-        # In the event that there is already task data, we don't want to over
-        # write it. But you can't concatenate YAML, so we load what's already there 
-        # as a python dictionary, concatenate the old with the new, convert back
-        # to YAML, and then set the task.data to the combined. 
-        datatmp = {}
-        if task.data != '':
-            datatmp = yaml.safe_load(task.data)
-
-        behaviortmp = {"behaviors":item['behaviors']}
-        print(behaviortmp)
-        # This method of merging will have the effect of replacing any fields
-        # that already exist in the data block with new ones specified in the 
-        # new behavior data, when they have the same keys.  
-        mergeddata = {**datatmp, **behaviortmp}
-        task.data = yaml.dump(mergeddata)
-        rospy.loginfo("parsed behavior fields in task %s,\"%s\":\n %s" %
-                      (item['type'],item['label'],task.data))
-
-            
-        return 
 
     def parseMission(self, plan, parent_id='', ignore_list = []):
         """ Create a task dict from a json description.
@@ -475,6 +429,15 @@ class MissionManager(object):
 
                 sub_tasks = self.parseMission(item['children'], parent_id+task.id+'/', ['Waypoint', 'Behavior'])
                 ret['tasks'] += sub_tasks['tasks']
+
+                # if we have behaviors, add an idle subtask to we don't take off
+                # before the behavior has a chance to send subtasks
+                if len(task.behaviors):
+                    idle_task = TaskInformation()
+                    idle_task.type = "idle"
+                    idle_task.id = task.id+"/behavior_idle"
+                    idle_task.priority = 99
+                    ret['tasks'].append(idle_task)
 
             if item['type'] == 'Group':
                 task = self.newTaskWithID(item, parent_id, 'group_'+str(len(ret['tasks'])))
