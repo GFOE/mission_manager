@@ -101,7 +101,7 @@ class MissionManager(object):
                     self.behavior_info_publishers[bhv.id] = rospy.Publisher('project11/behaviors/' +
                                                                         bhv.type + 
                                                                         '/input',
-                                                                        BehaviorInformation,
+                                                                        TaskInformation,
                                                                         queue_size=10,
                                                                         latch=True)
             
@@ -111,7 +111,7 @@ class MissionManager(object):
                                                                         BehaviorInformation,
                                                                         queue_size=1)
                 print("publishing behavior: %s" % bhv)
-                self.behavior_info_publishers[bhv.id].publish(bhv)
+                self.behavior_info_publishers[bhv.id].publish(t)
 
             # Send the behavior info here for each? or Wait until feedback from the navigator?
             
@@ -156,8 +156,10 @@ class MissionManager(object):
         if feedback is not None:
             for updated_task in feedback.tasks:
                 # If it is an override task (which won't be in our task list...)
-                if self.override_task is not None and self.override_task.id == updated_task.id:
-                    # If the task in the list returned is done, update our local task list.
+                if (self.override_task is not None and 
+                    self.override_task.id == updated_task.id):
+                    # If the task in the list returned is done, 
+                    # update our local task list.
                     if updated_task.done:
                         self.override_task = None
                         needUpdate = True
@@ -172,11 +174,17 @@ class MissionManager(object):
         if feedback is not None:
             # TODO: Verify that the task and its children activate the task. 
             if feedback.current_nav_task in self.behavior_library.keys():
-                # Loop through each behavior and activate/update them.
-                for bhv in self.behavior_library[feedback.current_nav_task]:
-                    print("publishing behavior %s" % bhv.id)
-                    print(bhv)
-                    self.behavior_info_publishers[bhv.id].publish(bhv)
+                    # List comprehension to return the current nav task.
+                    task = [t for t in feedback.tasks if t.id == feedback.current_nav_task]
+                    for bhv in task[0].behaviors:
+                        self.behavior_info_publishers[bhv.id].publish(
+                            feedback.tasks[feedback.current_nav_task]
+                        )
+                # # Loop through each behavior and activate/update them.
+                # for bhv in feedback.tasks[feedback.current_nav_task]:
+                #     print("publishing behavior %s" % bhv.id)
+                #     print(bhv)
+                #     self.behavior_info_publishers[bhv.id].publish(bhv)
         else:
             rospy.logwarn('Did not activate behaviors. Timeout waiting for navigator feedback')
 
