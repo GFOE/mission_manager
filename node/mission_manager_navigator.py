@@ -8,6 +8,7 @@ from project11_msgs.msg import KeyValue
 from project11_msgs.msg import BehaviorInformation
 from project11_nav_msgs.msg import TaskInformation
 from geometry_msgs.msg import PoseStamped
+from mission_manager.srv import TaskManagerCmd
 import project11
 
 import actionlib
@@ -78,6 +79,16 @@ class MissionManager(object):
 
         self.navigator_client = actionlib.SimpleActionClient('navigator/run_tasks', 
                                                              project11_navigation.msg.RunTasksAction)
+        
+        self.taskServiceServer = rospy.Service('task_manager/',
+                                               TaskManagerCmd,
+                                               self.taskManagerCallback)
+        
+        # This one is used for debugging. It does not update the navigator.
+        self.taskServiceServerDebugger = rospy.Service('task_manager/debug',
+                                               TaskManagerCmd,
+                                               self.taskManagerCallbackDebugger)
+
         # A place to hold the running behavior information publishers.
         self.behavior_library = {}
         self.behavior_info_publishers = {}
@@ -172,19 +183,15 @@ class MissionManager(object):
 
         # Activate behaviors for each task:
         if feedback is not None:
-            # TODO: Verify that the task and its children activate the task. 
+            # TODO: Verify that the task and its children activate the behavior. 
             if feedback.current_nav_task in self.behavior_library.keys():
                     # List comprehension to return the current nav task.
-                    task = [t for t in feedback.tasks if t.id == feedback.current_nav_task]
+                    task = [t for t in feedback.tasks 
+                            if t.id == feedback.current_nav_task]
                     for bhv in task[0].behaviors:
                         self.behavior_info_publishers[bhv.id].publish(
                             feedback.tasks[feedback.current_nav_task]
                         )
-                # # Loop through each behavior and activate/update them.
-                # for bhv in feedback.tasks[feedback.current_nav_task]:
-                #     print("publishing behavior %s" % bhv.id)
-                #     print(bhv)
-                #     self.behavior_info_publishers[bhv.id].publish(bhv)
         else:
             rospy.logwarn('Did not activate behaviors. Timeout waiting for navigator feedback')
 
@@ -209,6 +216,56 @@ class MissionManager(object):
     def behaviorFeedbackCallback(self,feedback):
         rospy.loginfo(feedback)
         pass
+
+    def updateLocalTaskList(self,command,newtasks):
+        '''Updates the local task list'''
+
+        if command == 'replace_tasks':
+            rospy.loginfo('misison_manager: Replacing the task queue.')
+            self.tasks = []
+            self.tasks = newtasks
+        elif command == 'append_tasks':
+            rospy.loginfo('mission_manager: Appending navigation task(s) to the queue.')
+            self.tasks = self.tasks + newtasks
+        elif command == 'prepend_tasks':
+            rospy.loginfo('mission_manager: Prepending navigation task(s) to the queue.')
+            self.tasks = newtasks + self.tasks
+        elif command == 'clear_tasks':
+            rospy.loginfo('mission_manager: Clearing the navigation task queue.')
+            self.tasks = []
+        else:
+            rospy.logwarn('mission_manager: Received unknown command on task_manager service: ' + command)
+
+    def taskManagerCallback(self,msg):
+        '''Receives commands to manipulate the navigator's task list.
+        
+        Args:
+            string      command
+            project11_nav_msgs.TaskInformation[] tasks
+            ---
+            string      result
+            
+        '''
+
+        rospy.loginfo(msg)
+        self.updateLocalTaskList(msg.command,msg.tasks)
+        self.updateNavigator()
+
+        
+    def taskManagerCallbackDebugger(self,msg):
+        '''Receives commands to manipulate the navigator's task list.
+        
+        Args:
+            string      command
+            project11_nav_msgs.TaskInformation[] tasks
+            ---
+            string      result
+            
+        '''
+        self.updateLocalTaskList(msg.command, msg.tasks)
+
+        rospy.loginfo("TASK LIST:")
+        rospy.loginfo(self.tasks)
 
     def commandCallback(self, msg):
         """ Receives ROS command String.

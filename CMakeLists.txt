@@ -11,6 +11,8 @@ find_package(catkin REQUIRED COMPONENTS
   message_generation
   dynamic_reconfigure
   path_follower
+  project11_nav_msgs
+  
 )
 
 catkin_python_setup()
@@ -33,10 +35,21 @@ generate_dynamic_reconfigure_options(
  #  actionlib_msgs
  #)
 
+ add_service_files(
+  FILES
+  TaskManagerCmd.srv
+)
+
+generate_messages(
+        DEPENDENCIES
+        project11_nav_msgs
+)
+
+
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES missionmanager
-  CATKIN_DEPENDS rospy std_msgs geometry_msgs nav_msgs
+  CATKIN_DEPENDS rospy message_runtime std_msgs geometry_msgs nav_msgs project11_nav_msgs
 #  DEPENDS system_lib
 )
 
