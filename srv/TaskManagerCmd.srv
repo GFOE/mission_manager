@@ -1,0 +1,11 @@
+# Task Manager Command Service
+
+# The command
+string command
+
+# The task list (may be empty)
+project11_nav_msgs/TaskInformation[]   tasks
+
+---
+# The service result. 
+string result
