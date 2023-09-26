@@ -179,7 +179,7 @@ class MissionManager(object):
                     if task.id == updated_task.id:
                         task.done = updated_task.done
 
-        print(feedback.current_nav_task)
+        #print(feedback.current_nav_task)
 
         # Activate behaviors for each task:
         if feedback is not None:
@@ -214,7 +214,7 @@ class MissionManager(object):
 
     
     def behaviorFeedbackCallback(self,feedback):
-        rospy.loginfo(feedback)
+        rospy.loginfo('behavior feedback:', feedback)
         pass
 
     def updateLocalTaskList(self,command,newtasks):
@@ -513,8 +513,13 @@ class MissionManager(object):
             if item['type'] == 'Orbit':
                 task = self.newTaskWithID(item, parent_id, 'orbit_'+str(len(ret['tasks'])))
                 task.type = "orbit"
-                data = {'speed':item['speed'], 'radius':item['radius'], 'safety_distance':item['safetyDistance']}
-                task.data = yaml.safe_dumps(data)
+                #data = yaml.safe_load(task.data)
+                data = {}
+                data['radius'] = item['radius']
+                data['safety_distance'] = item['safetyDistance']
+                if len(task.data):
+                    task.data += '\n'
+                task.data += yaml.safe_dump(data)
                 if len(item['targetFrame']):
                     target = PoseStamped()
                     target.pose.orientation.w = 1.0
