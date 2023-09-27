@@ -8,7 +8,7 @@ from project11_msgs.msg import KeyValue
 from project11_msgs.msg import BehaviorInformation
 from project11_nav_msgs.msg import TaskInformation
 from geometry_msgs.msg import PoseStamped
-from mission_manager.srv import TaskManagerCmd
+from mission_manager.srv import TaskManagerCmd, TaskManagerCmdResponse
 import project11
 
 import actionlib
@@ -16,6 +16,7 @@ import project11_navigation.msg
 import json
 import yaml
 
+import trackpatterns
 
 def parseLatLong(args):
     """ Splits a string into latitude and longitude.
@@ -80,12 +81,12 @@ class MissionManager(object):
         self.navigator_client = actionlib.SimpleActionClient('navigator/run_tasks', 
                                                              project11_navigation.msg.RunTasksAction)
         
-        self.taskServiceServer = rospy.Service('task_manager/',
+        self.taskServiceServer = rospy.Service('~task_manager',
                                                TaskManagerCmd,
                                                self.taskManagerCallback)
         
         # This one is used for debugging. It does not update the navigator.
-        self.taskServiceServerDebugger = rospy.Service('task_manager/debug',
+        self.taskServiceServerDebugger = rospy.Service('~task_manager/debug',
                                                TaskManagerCmd,
                                                self.taskManagerCallbackDebugger)
 
@@ -97,6 +98,46 @@ class MissionManager(object):
         self.updateNavigator()
 
     def updateNavigator(self):
+
+        # check if tasks need processing
+        new_tasks = []
+        for task in self.tasks:
+            if task.type == 'survey_area':
+                data = yaml.safe_load(task.data)
+                if data is not None and 'survey_type' in data and data['survey_type'] == 'search':
+                    # look for survey_line subtasks
+                    rospy.loginfo("found a search survey_area")
+                    have_survey_line = False
+                    for potential_subtask in self.tasks:
+                        if potential_subtask.id != task.id and potential_subtask.id.startswith(task.id):
+                            if potential_subtask.type == 'survey_line':
+                                have_survey_line = True
+                                break
+                    rospy.loginfo("survey lines? "+str(have_survey_line))
+                    if not have_survey_line:
+                        spacing = data['spacing']
+                        speed = data['speed']
+                        start_position =  PoseStamped()
+                        start_position.header = task.poses[0].header
+                        if 'start_x' in data and 'start_y' in data:
+                            start_position.pose.position.x = data['start_x']
+                            start_position.pose.position.y = data['start_y']
+                        else:
+                            sum_x = 0.0
+                            sum_y = 0.0
+                            count = 0.0
+                            for pose in task.poses:
+                                sum_x += pose.pose.position.x
+                                sum_y += pose.pose.position.y
+                                count += 1.0
+                            start_position.pose.position.x = sum_x/count
+                            start_position.pose.position.y = sum_y/count
+                        search = trackpatterns.ExpandingBoxSearch(startLocation = start_position, loopSpacing = spacing, searchSpeedKts = speed*1.94384)
+                        subtask = search.create(task.id+'/line')
+                        rospy.loginfo(subtask)
+                        new_tasks.append(subtask)
+        self.tasks = self.tasks + new_tasks
+
         goal = project11_navigation.msg.RunTasksGoal()
         if(self.override_task is not None):
             goal.tasks.append(self.override_task)
@@ -233,6 +274,27 @@ class MissionManager(object):
         elif command == 'clear_tasks':
             rospy.loginfo('mission_manager: Clearing the navigation task queue.')
             self.tasks = []
+        elif command == 'update':
+            rospy.loginfo('mission_manager: Updating or appending tasks.')
+            updated_tasks = []
+            for old_task in self.tasks:
+                updated = False
+                for new_task in newtasks:
+                    if new_task.id == old_task.id:
+                        updated_tasks.append(new_task)
+                        updated = True
+                        break
+                if not updated:
+                    updated_tasks.append(old_task)
+            for new_task in newtasks:
+                missing = True
+                for updated_task in updated_tasks:
+                    if updated_task.id == new_task.id:
+                        missing = False
+                        break
+                if missing:
+                    updated_tasks.append(new_task)
+            self.tasks = updated_tasks
         else:
             rospy.logwarn('mission_manager: Received unknown command on task_manager service: ' + command)
 
@@ -250,6 +312,10 @@ class MissionManager(object):
         rospy.loginfo(msg)
         self.updateLocalTaskList(msg.command,msg.tasks)
         self.updateNavigator()
+
+        response = TaskManagerCmdResponse()
+        return response
+
 
         
     def taskManagerCallbackDebugger(self,msg):

@@ -127,12 +127,15 @@ class ExpandingBoxSearch():
 
         self.pattern = TaskInformation()
 
-    def create(self):
+    def create(self, id = None):
         '''Creates an Expanding Box Search Pattern'''
 
-        # Setup the task. Use a random id so it is unique.
-        self.pattern.id = 'searchpattern' + str(np.random.randint(1e6))
-        self.pattern.type = 'surveyline'
+        if id is None:
+            # Setup the task. Use a random id so it is unique.
+            self.pattern.id = 'searchpattern' + str(np.random.randint(1e6))
+        else:
+            self.pattern.id = id
+        self.pattern.type = 'survey_line'
         self.pattern.priority = 0
         self.pattern.data = yaml.safe_dump({'speed': self.searchSpeed})
         self.pattern.poses.append(self.startLocation)
@@ -161,6 +164,7 @@ class ExpandingBoxSearch():
             if np.mod(z,2) == 0:
                 segmentLength = segmentLength + self.loopSpacing
             z+=1
+        return self.pattern
 
 class RaceTrackPattern():
     '''A class to create a sliding rectangle racetrack pattern.
