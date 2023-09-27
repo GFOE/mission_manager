@@ -9,7 +9,6 @@ find_package(catkin REQUIRED COMPONENTS
   nav_msgs
   tf2
   message_generation
-  dynamic_reconfigure
   path_follower
   project11_nav_msgs
   
@@ -17,25 +16,7 @@ find_package(catkin REQUIRED COMPONENTS
 
 catkin_python_setup()
 
-generate_dynamic_reconfigure_options(
-    cfg/mission_manager.cfg
-)
-
-## Generate actions in the 'action' folder
-# add_action_files(
-#   FILES
-#   Behavior.action
-#   Action2.action
-# )
- 
- ## Generate added messages and services with any dependencies listed here
- # generate_messages(
- #  DEPENDENCIES
- #  std_msgs  # Or other packages containing msgs
- #  actionlib_msgs
- #)
-
- add_service_files(
+add_service_files(
   FILES
   TaskManagerCmd.srv
 )
