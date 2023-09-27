@@ -1,4 +1,4 @@
-'''trackpatterns.py
+'''track_patterns.py
 
 Val Schmidt
 Center for Coastal and Ocean Mapping
@@ -8,7 +8,7 @@ Copyright 2023
 This module contains routines that create canned track patterns, which can be
 used as building blocks to create larger missions or to dynamically respond to 
 changing situations quickly. Track patterns are returned as a list of 
-proejct11_nav_msgs/TaskInformation messages which can be passed on directly to
+project11_nav_msgs/TaskInformation messages which can be passed on directly to
 the MissionManager node, which in turn, will then update the Navigator node 
 for execution. (See the mission_manager service for updating the task queue.)
 
@@ -16,12 +16,12 @@ Routines in this library operate in Euclidean space unless their documentation
 explicitly allows for on-the-fly translation. The return TaskInformation() 
 messages provide a list of Poses. 
 
-Typeically a pattern is centered or bounded on some point. The return navigation
+Typically a pattern is centered or bounded on some point. The return navigation
 task will be provided in the same frame_id as the input.
 
 Typical Usage:
 --------------
-import trackpatterns
+import track_patterns
 from geometry_msgs.msg import PoseStamped
 
 Ps = PoseStamped()
@@ -30,7 +30,7 @@ Ps = PoseStamped()
 
 S = ExpandingBoxSearch(name='searchtest',
                         startLocation = Ps,
-                        startHeadding = 0,
+                        startHeading = 0,
                         searchSpeedKts = 5,
                         loopSpacing = 500,
                         maxSearchRadius = 15000)
@@ -118,7 +118,6 @@ class ExpandingBoxSearch():
 
         self.name = name
         self.startLocation = startLocation
-        self.startLocation.header.frame_id = "map"
         self.startHeading = startHeading + 90 # Makes 0 north.
         self.loopSpacing = loopSpacing
         self.maxSearchRadius = maxSearchRadius
@@ -132,7 +131,7 @@ class ExpandingBoxSearch():
 
         if id is None:
             # Setup the task. Use a random id so it is unique.
-            self.pattern.id = 'searchpattern' + str(np.random.randint(1e6))
+            self.pattern.id = 'search_pattern' + str(np.random.randint(1e6))
         else:
             self.pattern.id = id
         self.pattern.type = 'survey_line'
@@ -205,8 +204,8 @@ class RaceTrackPattern():
     def create(self):
 
         # Setup the task. Use a random id so it is unique.
-        self.pattern.id = 'racetrackpattern' + str(np.random.randint(1e6))
-        self.pattern.type = 'surveyline'
+        self.pattern.id = 'racetrack_pattern' + str(np.random.randint(1e6))
+        self.pattern.type = 'survey_line'
         self.pattern.priority = 0
         self.pattern.data = yaml.safe_dump({'speed': self.speed})
 
