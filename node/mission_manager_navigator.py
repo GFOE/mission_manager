@@ -524,6 +524,9 @@ class MissionManager(object):
                     target = PoseStamped()
                     target.pose.orientation.w = 1.0
                     target.header.frame_id = item['targetFrame']
+                    target.pose.position.x = item['targetPositionX']
+                    target.pose.position.y = item['targetPositionY']
+                    target.pose.position.z = item['targetPositionZ']
                     task.poses.append(target)
                 ret['tasks'].append(task)
 
