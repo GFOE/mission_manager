@@ -18,6 +18,8 @@ catkin_python_setup()
 
 add_service_files(
   FILES
+  TaskInformationIdList.srv
+  TaskInformationList.srv
   TaskManagerCmd.srv
 )
 

@@ -19,7 +19,7 @@ import yaml
 def parseLatLong(args):
     """ Splits a string into latitude and longitude.
 
-    Splits a string in two and crates a dictionary with 
+    Splits a string in two and creates a dictionary with 
     latitude and longitude keys and float values.
 
     Args:
@@ -54,10 +54,13 @@ class MissionManager(object):
         Keeping all the tasks allows us to run them in a loop
         Elements of the list are dictionary objects - see addTask()
         """
+
         self.tasks = []
+
         # A task that may be added, such as hover,
         # to temporarily interrupt current task.
         self.override_task = None
+
         self.done_task = TaskInformation()
         self.done_task.type = "hover"
         self.done_task.id = "done_hover"
@@ -66,6 +69,11 @@ class MissionManager(object):
         # A dictionary of behaviors, keyed on task.id.
         self.behaviors_library = {}
         self.active_behaviors = []
+
+        # A place to hold the running behavior information publishers.
+        self.behavior_library = {}
+        self.behavior_info_publishers = {}
+        self.behavior_feedback_subscribers = {}
 
         self.command_subscriber = rospy.Subscriber('project11/mission_manager/command', 
                                                    String, self.commandCallback,
@@ -83,15 +91,7 @@ class MissionManager(object):
                                                TaskManagerCmd,
                                                self.taskManagerCallback)
         
-        # This one is used for debugging. It does not update the navigator.
-        self.taskServiceServerDebugger = rospy.Service('~task_manager/debug',
-                                               TaskManagerCmd,
-                                               self.taskManagerCallbackDebugger)
 
-        # A place to hold the running behavior information publishers.
-        self.behavior_library = {}
-        self.behavior_info_publishers = {}
-        self.behavior_feedback_subscribers = {}
 
         self.updateNavigator()
 
@@ -217,19 +217,19 @@ class MissionManager(object):
         rospy.loginfo('behavior feedback:', feedback)
         pass
 
-    def updateLocalTaskList(self,command,newtasks):
+    def updateLocalTaskList(self,command,new_tasks):
         '''Updates the local task list'''
 
         if command == 'replace_tasks':
-            rospy.loginfo('misison_manager: Replacing the task queue.')
+            rospy.loginfo('missison_manager: Replacing the task queue.')
             self.tasks = []
-            self.tasks = newtasks
+            self.tasks = new_tasks
         elif command == 'append_tasks':
             rospy.loginfo('mission_manager: Appending navigation task(s) to the queue.')
-            self.tasks = self.tasks + newtasks
+            self.tasks = self.tasks + new_tasks
         elif command == 'prepend_tasks':
             rospy.loginfo('mission_manager: Prepending navigation task(s) to the queue.')
-            self.tasks = newtasks + self.tasks
+            self.tasks = new_tasks + self.tasks
         elif command == 'clear_tasks':
             rospy.loginfo('mission_manager: Clearing the navigation task queue.')
             self.tasks = []
@@ -238,14 +238,14 @@ class MissionManager(object):
             updated_tasks = []
             for old_task in self.tasks:
                 updated = False
-                for new_task in newtasks:
+                for new_task in new_tasks:
                     if new_task.id == old_task.id:
                         updated_tasks.append(new_task)
                         updated = True
                         break
                 if not updated:
                     updated_tasks.append(old_task)
-            for new_task in newtasks:
+            for new_task in new_tasks:
                 missing = True
                 for updated_task in updated_tasks:
                     if updated_task.id == new_task.id:
@@ -274,23 +274,6 @@ class MissionManager(object):
 
         response = TaskManagerCmdResponse()
         return response
-
-
-        
-    def taskManagerCallbackDebugger(self,msg):
-        '''Receives commands to manipulate the navigator's task list.
-        
-        Args:
-            string      command
-            project11_nav_msgs.TaskInformation[] tasks
-            ---
-            string      result
-            
-        '''
-        self.updateLocalTaskList(msg.command, msg.tasks)
-
-        rospy.loginfo("TASK LIST:")
-        rospy.loginfo(self.tasks)
 
     def commandCallback(self, msg):
         """ Receives ROS command String.
@@ -389,16 +372,6 @@ class MissionManager(object):
                 task_list = tasks_and_behaviors['tasks']
                 if len(tasks_and_behaviors['behaviors']) > 0:
                     rospy.logerr("mission_manager: top level behaviors not yet supported")
-            # elif task_type == 'goto':
-            #     task = parseLatLong(args)
-            #     if task is not None:
-            #         task['type'] = 'goto'
-            #         task_list.append(task)
-            # elif task_type == 'hover':
-            #     task = parseLatLong(args)
-            #     if task is not None:
-            #         task['type'] = 'hover'
-            #         task_list.append(task)
             else:
                 rospy.logerr("mission_manager: No defined task of type <%s> "
                              "from task string <%s>"%(task_type, args))
@@ -420,6 +393,7 @@ class MissionManager(object):
 
     def newTaskWithID(self, item, parent_id='', id='task'):
         task = TaskInformation()
+        sub_tasks = []
         if 'label' in item:
             task.id = parent_id+item['label']
         else:
@@ -429,9 +403,11 @@ class MissionManager(object):
         if 'children' in item:
             for sub_item in item['children']:
                 if sub_item['type'] == 'Behavior':
-                    task.behaviors.append(self.parseBehavior(sub_item))
+                    behaviors, behavior_tasks = self.parseBehavior(sub_item)
+                    task.behaviors.append(behaviors)
+                    sub_tasks = behavior_tasks
 
-        return task
+        return task, sub_tasks
 
 
     def parseWaypoints(self, items, task):
@@ -453,15 +429,15 @@ class MissionManager(object):
         return task
 
     def parseTrackLine(self, item, parent_id, id='line'):
-        task = self.newTaskWithID(item, parent_id, id)
+        task, sub_tasks = self.newTaskWithID(item, parent_id, id)
         task.type = "survey_line"
         try:
             self.parseWaypoints(item['children'], task)
         except KeyError:
             rospy.logwarn('"children" not found in ', item)
-        return task
+        return task, sub_tasks
     
-    def parseBehavior(self, item):
+    def parseBehavior(self, item, parent_id):
         '''Parse a single behavior mission item'''
         behavior = BehaviorInformation()
         try:
@@ -471,7 +447,15 @@ class MissionManager(object):
         behavior.type = item['behaviorType']
         behavior.enabled = item['enabled']
         behavior.data = yaml.safe_dump(item['data'])
-        return behavior
+
+        behavior_task, sub_tasks = self.newTaskWithID(item, parent_id, behavior.id)
+        behavior_task.type = "behavior"
+        behavior_task.behaviors.append(behavior)
+        tasks = []
+        tasks.append(behavior_task)
+        tasks += sub_tasks
+
+        return behavior, tasks
 
     def parseMission(self, plan, parent_id='', ignore_list = []):
         """ Create a task dict from a json description.
@@ -493,7 +477,7 @@ class MissionManager(object):
             rospy.loginfo("mission_manager: Parsing new mission item <%s>"%item)
 
             if item['type'] == 'Waypoint' and not 'Waypoint' in ignore_list:
-                task = self.newTaskWithID(item, parent_id, 'waypoint_'+str(len(ret)))
+                task, sub_tasks = self.newTaskWithID(item, parent_id, 'waypoint_'+str(len(ret)))
                 task.poses.append(self.earth.geoToPose(item['latitude'], item['longitude']))
                 task.type = "goto"
 

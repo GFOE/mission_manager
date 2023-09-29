@@ -1,6 +1,6 @@
 # Overview
 
-A new simpler mission_manager_navigator.py node is used to convert mission items from camp to a list of project11_nav_msgs/TaskInformation messages and sends the list to the project11_navigation's navigator node.
+A new simpler mission_manager_node.py node is used to convert mission items from camp to a list of project11_nav_msgs/TaskInformation messages and sends the list to the project11_navigation's navigator node.
 
 The following is deprecated.
 
