@@ -130,7 +130,7 @@ class MissionManager(object):
                     task_feedback = TaskFeedback()
                     task_feedback.current_navigation_task = feedback.feedback.current_navigation_task
                     task_feedback.tasks.append(task.message())
-                    task_feedback.tasks += task.desendantMessages()
+                    #task_feedback.tasks += task.desendantMessages()
 
                     for behavior in task.task_information.behaviors:
                         self.behavior_info_publishers[behavior.id].publish(task_feedback)
