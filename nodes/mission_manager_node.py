@@ -151,8 +151,6 @@ class MissionManager(object):
     def replaceTasks(self, new_tasks):
         self.tasks.clear()
         self.tasks.addOrUpdateMany(new_tasks)
-        if self.done_task_information is not None:
-            self.appendTasks(self.done_task_information)
         self.updateNavigator()
 
     def appendTasks(self, new_tasks):
@@ -165,6 +163,8 @@ class MissionManager(object):
 
     def clearTasks(self):
         self.tasks.clear()
+        if self.done_task_information is not None:
+            self.appendTasks([self.done_task_information,])
         self.updateNavigator()
 
     def updateTasks(self, new_or_updated_tasks):

@@ -203,14 +203,14 @@ class CampInterface:
         
   def alignPoses(self, poses):
     q = Quaternion()
-    for i in range(poses):
+    for i in range(len(poses)):
       p1 = poses[i]
       if i+1 < len(poses):
         p2 = poses[i+1]
         dx = p2.pose.position.x - p1.pose.position.x
         dy = p2.pose.position.y - p1.pose.position.y
         yaw = math.atan2(dy, dx)
-        q = project11.yawRadiansToQuaternionMsg(yaw)
+        q = project11.nav.yawRadiansToQuaternionMsg(yaw)
       poses[i].pose.orientation = q
       
 
@@ -303,6 +303,9 @@ class CampInterface:
         idle_task.id = task.id+"/behavior_idle"
         idle_task.priority = 99
         task_list.append(idle_task)
+
+      if task.type == 'survey_line':
+        self.alignPoses(task.poses)
 
 
     return task_list     
