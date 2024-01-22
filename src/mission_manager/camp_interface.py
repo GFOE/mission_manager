@@ -44,14 +44,14 @@ def parseLatLong(args):
   return None
 
 
-def listTasks(feedback, hb):
+def listTasks(tasks, hb):
   """Lists tasks as key value pairs"""
-  if feedback is None:
+  if tasks is None:
     hb.values.append(KeyValue("tasks","none"))
     return
-  if len(feedback.feedback.tasks) == 0:
+  if len(tasks) == 0:
     hb.values.append(KeyValue("tasks","empty"))
-  for task in feedback.feedback.tasks:
+  for task in tasks:
     kv = KeyValue()
     kv.key = task.id
     kv.value = "type: "+task.type
@@ -84,14 +84,14 @@ class CampInterface:
     hb.values.append(KeyValue("Navigator","active"))
     if feedback is not None:
       hb.values.append(KeyValue("Current Nav Task", feedback.feedback.current_navigation_task))
-    listTasks(feedback, hb)
+    listTasks(feedback.feedback.tasks, hb)
     self.status_publisher.publish(hb)
 
 
   def navigatorDone(self, state, result):
     hb = Heartbeat()
     hb.values.append(KeyValue("Navigator","done"))
-    listTasks(result, hb)
+    listTasks(result.tasks, hb)
     self.status_publisher.publish(hb)
 
   def commandCallback(self, msg):
