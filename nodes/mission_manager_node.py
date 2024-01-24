@@ -96,7 +96,8 @@ class MissionManager(object):
 
         if self.navigator_client.wait_for_server(rospy.Duration(2.0)):
             rospy.loginfo("mission_manager: sending goal:")
-            rospy.loginfo(goal)
+            for t in goal.tasks:
+                rospy.loginfo(" task: "+ t.id + " type: " + t.type + " status: " + t.status + " done: " + str(t.done))
             self.navigator_client.send_goal(goal,
                                             active_cb = self.navigatorActiveCallback,
                                             feedback_cb = self.navigatorFeedbackCallback,
@@ -142,6 +143,7 @@ class MissionManager(object):
             self.updateNavigator()
 
     def navigatorDoneCallback(self, state, result):
+        rospy.loginfo("navigator done")
         self.camp.navigatorDone(state, result)
 
     

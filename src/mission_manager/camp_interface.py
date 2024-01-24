@@ -2,6 +2,7 @@
 
 import rospy
 import project11
+import datetime
 
 from std_msgs.msg import String
 from geometry_msgs.msg import PoseStamped, Quaternion
@@ -81,6 +82,8 @@ class CampInterface:
 
   def navigatorFeedback(self, feedback):
     hb = Heartbeat()
+    now = datetime.datetime.utcfromtimestamp(rospy.Time.now().to_sec())
+    hb.values.append(KeyValue("T", now.isoformat(timespec='milliseconds')))
     hb.values.append(KeyValue("Navigator","active"))
     if feedback is not None:
       hb.values.append(KeyValue("Current Nav Task", feedback.feedback.current_navigation_task))
@@ -90,8 +93,13 @@ class CampInterface:
 
   def navigatorDone(self, state, result):
     hb = Heartbeat()
+    now = datetime.datetime.utcfromtimestamp(rospy.Time.now().to_sec())
+    hb.values.append(KeyValue("T", now.isoformat(timespec='milliseconds')))
     hb.values.append(KeyValue("Navigator","done"))
-    listTasks(result.tasks, hb)
+    if(result is None):
+      listTasks(None, hb)
+    else:
+      listTasks(result.tasks, hb)
     self.status_publisher.publish(hb)
 
   def commandCallback(self, msg):
