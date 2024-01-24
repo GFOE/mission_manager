@@ -15,7 +15,6 @@
   <depend>nav_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>dynamic_reconfigure</depend>
-  <depend>path_follower</depend>
   <depend>project11_nav_msgs</depend>
   <exec_depend>python-yaml</exec_depend>
 

@@ -9,7 +9,6 @@ find_package(catkin REQUIRED COMPONENTS
   nav_msgs
   tf2
   message_generation
-  path_follower
   project11_nav_msgs
   
 )
