@@ -235,7 +235,10 @@ class CampInterface:
       id = 'item_'+task_number_str
       if 'priority' in item:
         task.priority = item['priority']
-      data = {}
+      if 'task_data' in item:
+        data = yaml.safe_load(item['task_data'])
+      else:      
+        data = {}
       if 'speed' in item:
         data['speed'] = item['speed']*0.514444 # knots to m/s
       if 'type' in item:
